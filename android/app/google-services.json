@@ -1,0 +1,90 @@
+{
+  "project_info": {
+    "project_number": "26394488999",
+    "project_id": "insurance-1178e",
+    "storage_bucket": "insurance-1178e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26394488999:android:4b12a8fdc381844ff6ab82",
+        "android_client_info": {
+          "package_name": "com.example.policy"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26394488999-lc7pdfsqrcoiff86a2mf1cruvpk8e1fj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.policy",
+            "certificate_hash": "fcf02df43e88eb3930ade3a1afbd0849466184c7"
+          }
+        },
+        {
+          "client_id": "26394488999-fpeovj7949q5tcfph6jh8lglb53jld4r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVELm6-egcrBnpjtw1tfE4snnauUpW9Rc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26394488999-fpeovj7949q5tcfph6jh8lglb53jld4r.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "26394488999-iifaetek80hqkv98e7kpd07bt6q5v08p.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.insure.insurance"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26394488999:android:42bbba35ae9e1d95f6ab82",
+        "android_client_info": {
+          "package_name": "com.insure.insurance"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "26394488999-fpeovj7949q5tcfph6jh8lglb53jld4r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVELm6-egcrBnpjtw1tfE4snnauUpW9Rc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "26394488999-fpeovj7949q5tcfph6jh8lglb53jld4r.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "26394488999-iifaetek80hqkv98e7kpd07bt6q5v08p.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.insure.insurance"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
