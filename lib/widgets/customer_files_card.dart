@@ -1,11 +1,10 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../utils/audit_log_service.dart';
+import '../utils/document_picker.dart';
+import '../utils/document_opener.dart';
 
 class CustomerFilesCard extends StatefulWidget {
   final String customerId;
@@ -62,35 +61,51 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
   String? _getContentType(String fileName) {
     final ext = fileName.split('.').last.toLowerCase();
     switch (ext) {
-      case 'pdf': return 'application/pdf';
-      case 'png': return 'image/png';
+      case 'pdf':
+        return 'application/pdf';
+      case 'png':
+        return 'image/png';
       case 'jpg':
-      case 'jpeg': return 'image/jpeg';
-      case 'gif': return 'image/gif';
-      case 'txt': return 'text/plain';
-      case 'csv': return 'text/csv';
-      case 'doc': return 'application/msword';
-      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls': return 'application/vnd.ms-excel';
-      case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      default: return 'application/octet-stream';
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'gif':
+        return 'image/gif';
+      case 'txt':
+        return 'text/plain';
+      case 'csv':
+        return 'text/csv';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      default:
+        return 'application/octet-stream';
     }
   }
 
   IconData _getFileIcon(String fileName) {
     final ext = fileName.split('.').last.toLowerCase();
     switch (ext) {
-      case 'pdf': return Icons.picture_as_pdf_outlined;
+      case 'pdf':
+        return Icons.picture_as_pdf_outlined;
       case 'png':
       case 'jpg':
       case 'jpeg':
-      case 'gif': return Icons.image_outlined;
+      case 'gif':
+        return Icons.image_outlined;
       case 'doc':
-      case 'docx': return Icons.description_outlined;
+      case 'docx':
+        return Icons.description_outlined;
       case 'xls':
       case 'xlsx':
-      case 'csv': return Icons.table_chart_outlined;
-      default: return Icons.insert_drive_file_outlined;
+      case 'csv':
+        return Icons.table_chart_outlined;
+      default:
+        return Icons.insert_drive_file_outlined;
     }
   }
 
@@ -98,22 +113,16 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
     if (_uploading) return;
 
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-        withData: true,
-      );
-
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.single;
+      final file = await pickDocumentBytes();
+      if (file == null) return;
       final fileBytes = file.bytes;
 
-      if (fileBytes == null) {
+      if (fileBytes.isEmpty) {
         throw Exception('Could not read file data. Please try again.');
       }
 
       // Prompt for document name
+      if (!mounted) return;
       final controller = TextEditingController(text: file.name);
       final docName = await showDialog<String>(
         context: context,
@@ -180,7 +189,8 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
       // Create a safe, unique filename
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final safeName = customName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final storagePath = 'customer_files/${widget.customerId}/${timestamp}_$safeName';
+      final storagePath =
+          'customer_files/${widget.customerId}/${timestamp}_$safeName';
 
       final ref = FirebaseStorage.instance.ref(storagePath);
       await ref.putData(
@@ -211,14 +221,12 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
       await AuditLogService.write(
         page: 'Customer Files',
         action: 'Uploaded Document',
-        description: 'Uploaded document "$customName" for customer "${widget.customerName}".',
+        description:
+            'Uploaded document "$customName" for customer "${widget.customerName}".',
         targetId: widget.customerId,
         targetType: 'Customer',
         targetName: widget.customerName,
-        extra: {
-          'customerName': widget.customerName,
-          'fileName': customName,
-        },
+        extra: {'customerName': widget.customerName, 'fileName': customName},
       );
 
       if (mounted) {
@@ -232,10 +240,7 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Upload failed: $e'),
-            backgroundColor: _red,
-          ),
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: _red),
         );
       }
     } finally {
@@ -248,13 +253,30 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
     }
   }
 
-  Future<void> _openFileUrl(BuildContext context, String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null ||
-        !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+  Future<void> _openFileUrl(
+    BuildContext context, {
+    required String fileUrl,
+    required String storagePath,
+  }) async {
+    var url = fileUrl.trim();
+    if (url.isEmpty && storagePath.trim().isNotEmpty) {
+      try {
+        url = await FirebaseStorage.instance
+            .ref(storagePath.trim())
+            .getDownloadURL();
+      } catch (_) {
+        url = '';
+      }
+    }
+
+    if (url.isEmpty || !await openDocumentUrl(url)) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open document.')),
+        const SnackBar(
+          content: Text(
+            'Unable to open document. Please try uploading it again.',
+          ),
+        ),
       );
     }
   }
@@ -269,7 +291,9 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Document'),
-        content: Text('Are you sure you want to delete "$fileName"? This action cannot be undone.'),
+        content: Text(
+          'Are you sure you want to delete "$fileName"? This action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -294,19 +318,20 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
         // Continue even if storage delete fails
       }
 
-      await FirebaseFirestore.instance.collection('customer_files').doc(docId).delete();
+      await FirebaseFirestore.instance
+          .collection('customer_files')
+          .doc(docId)
+          .delete();
 
       await AuditLogService.write(
         page: 'Customer Files',
         action: 'Deleted Document',
-        description: 'Deleted document "$fileName" for customer "${widget.customerName}".',
+        description:
+            'Deleted document "$fileName" for customer "${widget.customerName}".',
         targetId: widget.customerId,
         targetType: 'Customer',
         targetName: widget.customerName,
-        extra: {
-          'customerName': widget.customerName,
-          'fileName': fileName,
-        },
+        extra: {'customerName': widget.customerName, 'fileName': fileName},
       );
 
       if (context.mounted) {
@@ -376,7 +401,10 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
               ),
             ],
@@ -452,11 +480,14 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
                     itemBuilder: (context, index) {
                       final doc = files[index];
                       final data = doc.data();
-                      final fileName = (data['fileName'] ?? 'Document').toString();
+                      final fileName = (data['fileName'] ?? 'Document')
+                          .toString();
                       final fileUrl = (data['fileUrl'] ?? '').toString();
-                      final storagePath = (data['storagePath'] ?? '').toString();
+                      final storagePath = (data['storagePath'] ?? '')
+                          .toString();
                       final uploadedAtStr = _formatDateTime(data['uploadedAt']);
-                      final uploadedBy = (data['uploadedBy'] ?? 'Unknown').toString();
+                      final uploadedBy = (data['uploadedBy'] ?? 'Unknown')
+                          .toString();
                       final type = (data['type'] ?? 'Document').toString();
 
                       return Container(
@@ -469,7 +500,11 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
                         ),
                         child: Row(
                           children: [
-                            Icon(_getFileIcon(fileName), color: _accent, size: 20),
+                            Icon(
+                              _getFileIcon(fileName),
+                              color: _accent,
+                              size: 20,
+                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
@@ -496,15 +531,32 @@ class _CustomerFilesCardState extends State<CustomerFilesCard> {
                                 ],
                               ),
                             ),
-                            if (fileUrl.isNotEmpty)
+                            if (fileUrl.isNotEmpty || storagePath.isNotEmpty)
                               IconButton(
-                                icon: const Icon(Icons.open_in_new_rounded, size: 16, color: _accent),
-                                onPressed: () => _openFileUrl(context, fileUrl),
+                                icon: const Icon(
+                                  Icons.open_in_new_rounded,
+                                  size: 16,
+                                  color: _accent,
+                                ),
+                                onPressed: () => _openFileUrl(
+                                  context,
+                                  fileUrl: fileUrl,
+                                  storagePath: storagePath,
+                                ),
                                 tooltip: 'Open',
                               ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline_rounded, size: 16, color: _red),
-                              onPressed: () => _confirmDelete(context, doc.id, storagePath, fileName),
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 16,
+                                color: _red,
+                              ),
+                              onPressed: () => _confirmDelete(
+                                context,
+                                doc.id,
+                                storagePath,
+                                fileName,
+                              ),
                               tooltip: 'Delete',
                             ),
                           ],

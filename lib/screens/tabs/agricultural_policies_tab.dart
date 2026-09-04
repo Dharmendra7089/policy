@@ -1,28 +1,27 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/auto_hide_controls.dart';
 import '../../utils/audit_log_service.dart';
 import '../../widgets/company_logo.dart';
-import '../../widgets/list_serial_number.dart';
 
-class AgriculturalPoliciesTab extends StatefulWidget {
+class AgriculturePoliciesTab extends StatefulWidget {
   final String category;
   final String title;
   final String? initialSection;
 
-  const AgriculturalPoliciesTab({
+  const AgriculturePoliciesTab({
     super.key,
-    this.category = 'Agricultural',
-    this.title = 'Agricultural Insurance',
+    this.category = 'Agriculture',
+    this.title = 'Agriculture Insurance',
     this.initialSection,
   });
 
   @override
-  State<AgriculturalPoliciesTab> createState() =>
-      _AgriculturalPoliciesTabState();
+  State<AgriculturePoliciesTab> createState() => _AgriculturePoliciesTabState();
 }
 
-class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
+class _AgriculturePoliciesTabState extends State<AgriculturePoliciesTab> {
   static const _primary = Color(0xFF0D2D4F);
   static const _accent = Color(0xFF0F766E);
   static const _bg = Color(0xFFF4F6F9);
@@ -99,93 +98,106 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            const Divider(height: 1, color: _border),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: _accent),
-                    );
-                  }
-                  if (snap.hasError) {
-                    return Center(child: Text('Error: ${snap.error}'));
-                  }
+        child: AutoHideControlsRegion(
+          controls: _buildHeader(context),
+          divider: const Divider(height: 1, color: _border),
+          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _stream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _accent),
+                );
+              }
+              if (snap.hasError) {
+                return Center(child: Text('Error: ${snap.error}'));
+              }
 
-                  var docs = (snap.data?.docs ?? [])
-                      .where(
-                        (d) =>
-                            (d.data()['category'] ?? widget.category)
-                                .toString() ==
-                            widget.category,
-                      )
-                      .toList();
-                  if (widget.initialSection != null) {
-                    docs = docs
-                        .where(
-                          (d) =>
-                              (d.data()['policySection'] ?? '')
-                                  .toString()
-                                  .trim() ==
-                              widget.initialSection,
-                        )
-                        .toList();
-                  }
-                  if (_selectedSection != null) {
-                    docs = docs
-                        .where(
-                          (d) =>
-                              (d.data()['policySection'] ?? '')
-                                  .toString()
-                                  .trim() ==
-                              _selectedSection,
-                        )
-                        .toList();
-                  }
-                  if (_search.isNotEmpty) {
-                    docs = docs.where((d) {
-                      final data = d.data();
-                      return (data['planName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['policyCode'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['companyName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['policySection'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search);
-                    }).toList();
-                  }
+              var docs = (snap.data?.docs ?? [])
+                  .where(
+                    (d) =>
+                        (d.data()['category'] ?? widget.category).toString() ==
+                        widget.category,
+                  )
+                  .toList();
+              if (widget.initialSection != null) {
+                docs = docs
+                    .where(
+                      (d) =>
+                          (d.data()['policySection'] ?? '').toString().trim() ==
+                          widget.initialSection,
+                    )
+                    .toList();
+              }
+              if (_selectedSection != null) {
+                docs = docs
+                    .where(
+                      (d) =>
+                          (d.data()['policySection'] ?? '').toString().trim() ==
+                          _selectedSection,
+                    )
+                    .toList();
+              }
+              if (_search.isNotEmpty) {
+                docs = docs.where((d) {
+                  final data = d.data();
+                  return (data['planName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['policyCode'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['companyName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['policySection'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search);
+                }).toList();
+              }
+              docs.sort(_comparePolicyCompanyThenPlan);
 
-                  if (docs.isEmpty) return _buildEmpty(context);
+              if (docs.isEmpty) return _buildEmpty(context);
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.all(20),
-                    itemCount: docs.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _GeneralPolicyRow(
-                      doc: docs[i],
-                      serialNumber: i + 1,
-                      onTap: () => setState(() => _selectedDoc = docs[i]),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+              return GridView.builder(
+                padding: const EdgeInsets.all(20),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 3.05,
+                ),
+                itemCount: docs.length,
+                itemBuilder: (context, i) => _AgriculturePolicyGridCard(
+                  doc: docs[i],
+                  serialNumber: i + 1,
+                  onTap: () => setState(() => _selectedDoc = docs[i]),
+                ),
+              );
+            },
+          ),
         ),
       ),
+    );
+  }
+
+  static int _comparePolicyCompanyThenPlan(
+    QueryDocumentSnapshot<Map<String, dynamic>> a,
+    QueryDocumentSnapshot<Map<String, dynamic>> b,
+  ) {
+    final aData = a.data();
+    final bData = b.data();
+    final companyCompare = (aData['companyName'] ?? '')
+        .toString()
+        .toLowerCase()
+        .compareTo((bData['companyName'] ?? '').toString().toLowerCase());
+    if (companyCompare != 0) return companyCompare;
+    return (aData['planName'] ?? '').toString().toLowerCase().compareTo(
+      (bData['planName'] ?? '').toString().toLowerCase(),
     );
   }
 
@@ -359,9 +371,44 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
     final isEdit = docId != null;
     final messenger = ScaffoldMessenger.of(context);
 
-    final companyName = TextEditingController(
-      text: existing?['companyName']?.toString() ?? '',
-    );
+    // Fetch insurance companies
+    List<Map<String, dynamic>> allCompanies = [];
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('insurance_companies')
+          .get();
+      allCompanies = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+      allCompanies.sort(
+        (a, b) => (a['companyName'] ?? '').toString().toLowerCase().compareTo(
+          (b['companyName'] ?? '').toString().toLowerCase(),
+        ),
+      );
+    } catch (_) {}
+
+    String? selectedCompanyId = existing?['companyId']?.toString();
+    String? selectedCompanyName = existing?['companyName']?.toString();
+    String? selectedCompanyLogoUrl = existing?['companyLogoUrl']?.toString();
+
+    if (selectedCompanyId != null && selectedCompanyName == null) {
+      for (final c in allCompanies) {
+        if (c['id'].toString() == selectedCompanyId) {
+          selectedCompanyName = c['companyName']?.toString();
+          selectedCompanyLogoUrl = c['logoUrl']?.toString();
+          break;
+        }
+      }
+    }
+    if (selectedCompanyName != null && selectedCompanyId == null) {
+      for (final c in allCompanies) {
+        if ((c['companyName'] ?? '').toString().trim().toLowerCase() ==
+            selectedCompanyName.trim().toLowerCase()) {
+          selectedCompanyId = c['id'].toString();
+          selectedCompanyLogoUrl ??= c['logoUrl']?.toString();
+          break;
+        }
+      }
+    }
+
     final planName = TextEditingController(
       text: existing?['planName']?.toString() ?? '',
     );
@@ -435,7 +482,6 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
         return StatefulBuilder(
           builder: (ctx, setS) {
             Future<void> save() async {
-              final companyValue = _clean(companyName);
               final planValue = _clean(planName);
               final codeValue = _clean(policyCode).toUpperCase();
               final renewalCommissionValue = _optionalPercent(renewalComm);
@@ -443,10 +489,12 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
                   ? _clean(customPolicySection)
                   : selectedPolicySection;
 
-              if (companyValue.isEmpty ||
-                  planValue.isEmpty ||
-                  codeValue.isEmpty) {
-                _showError('Company, plan name and policy code are required.');
+              if (selectedCompanyName == null || selectedCompanyName!.isEmpty) {
+                _showError('Please select an insurance company.');
+                return;
+              }
+              if (planValue.isEmpty || codeValue.isEmpty) {
+                _showError('Plan name and policy code are required.');
                 return;
               }
               if (policySectionValue.isEmpty) {
@@ -496,13 +544,18 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
                 }
 
                 final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-                final companyId = companyValue
-                    .toLowerCase()
-                    .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-                    .replaceAll(RegExp(r'^-|-$'), '');
+                final companyId =
+                    selectedCompanyId ??
+                    selectedCompanyName!
+                        .toLowerCase()
+                        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+                        .replaceAll(RegExp(r'^-|-$'), '');
                 final data = <String, dynamic>{
                   'companyId': companyId,
-                  'companyName': companyValue,
+                  'companyName': selectedCompanyName,
+                  if (selectedCompanyLogoUrl != null &&
+                      selectedCompanyLogoUrl!.isNotEmpty)
+                    'companyLogoUrl': selectedCompanyLogoUrl,
                   'planName': planValue,
                   'policyCode': codeValue,
                   'description': _clean(description),
@@ -516,7 +569,7 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
                     {'type': 'premium', 'slabs': cleanSlabs},
                   ],
                   'searchKey':
-                      '$planValue $codeValue $companyValue ${widget.category} $policySectionValue'
+                      '$planValue $codeValue $selectedCompanyName ${widget.category} $policySectionValue'
                           .toLowerCase(),
                   'updatedAt': FieldValue.serverTimestamp(),
                   'updatedBy': uid,
@@ -669,10 +722,26 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
                             spacing: 14,
                             runSpacing: 14,
                             children: [
-                              _dialogField(
-                                controller: companyName,
-                                label: 'Insurance Company',
-                                width: 420,
+                              _companyDropdownSelect(
+                                selectedId: selectedCompanyId,
+                                allCompanies: allCompanies,
+                                onChanged: (v) {
+                                  setS(() {
+                                    selectedCompanyId = v;
+                                    final match = allCompanies.where(
+                                      (c) => c['id'].toString() == v,
+                                    );
+                                    if (match.isNotEmpty) {
+                                      selectedCompanyName = match
+                                          .first['companyName']
+                                          ?.toString();
+                                      selectedCompanyLogoUrl = match
+                                          .first['logoUrl']
+                                          ?.toString();
+                                    }
+                                  });
+                                },
+                                width: 340,
                               ),
                               _dialogField(
                                 controller: planName,
@@ -684,15 +753,21 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
                                 label: 'Policy Code',
                                 width: 180,
                               ),
-                              _statusField(
-                                selectedStatus,
-                                statuses,
-                                (v) => setS(() => selectedStatus = v),
+                              _dropdownSelect(
+                                label: 'Status',
+                                value: selectedStatus,
+                                items: statuses,
+                                onChanged: (v) =>
+                                    setS(() => selectedStatus = v),
+                                width: 150,
                               ),
-                              _statusField(
-                                selectedPolicySection,
-                                _policySections,
-                                (v) => setS(() => selectedPolicySection = v),
+                              _dropdownSelect(
+                                label: 'Policy Section',
+                                value: selectedPolicySection,
+                                items: _policySections,
+                                onChanged: (v) =>
+                                    setS(() => selectedPolicySection = v),
+                                width: 220,
                               ),
                               if (selectedPolicySection == 'Other')
                                 _dialogField(
@@ -806,7 +881,6 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
       },
     );
 
-    companyName.dispose();
     planName.dispose();
     policyCode.dispose();
     description.dispose();
@@ -819,22 +893,95 @@ class _AgriculturalPoliciesTabState extends State<AgriculturalPoliciesTab> {
     }
   }
 
-  Widget _statusField(
-    String value,
-    List<String> statuses,
-    ValueChanged<String> onChanged,
-  ) {
+  Widget _companyDropdownSelect({
+    required String? selectedId,
+    required List<Map<String, dynamic>> allCompanies,
+    required ValueChanged<String> onChanged,
+    double width = 340,
+  }) {
+    final validId = allCompanies.any((c) => c['id'].toString() == selectedId)
+        ? selectedId
+        : null;
+
     return SizedBox(
-      width: 170,
+      width: width,
       child: DropdownButtonFormField<String>(
-        initialValue: value,
-        items: statuses
-            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+        isExpanded: true,
+        value: validId,
+        hint: const Text(
+          'Select Company',
+          style: TextStyle(color: _textMuted, fontSize: 13),
+        ),
+        items: allCompanies
+            .map(
+              (c) => DropdownMenuItem<String>(
+                value: c['id'].toString(),
+                child: Row(
+                  children: [
+                    CompanyLogo(
+                      companyName: c['companyName']?.toString() ?? '',
+                      customLogoUrl: c['logoUrl']?.toString(),
+                      size: 20,
+                      radius: 5,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        c['companyName']?.toString() ?? '',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13, color: _textMain),
+                      ),
+                    ),
+                    if ((c['companyType']?.toString() ?? '').isNotEmpty)
+                      Text(
+                        '(${c['companyType']})',
+                        style: const TextStyle(color: _textMuted, fontSize: 11),
+                      ),
+                  ],
+                ),
+              ),
+            )
             .toList(),
         onChanged: (v) {
           if (v != null) onChanged(v);
         },
-        decoration: _inputDecoration('Status'),
+        decoration: _inputDecoration('Company'),
+      ),
+    );
+  }
+
+  Widget _dropdownSelect({
+    required String label,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String> onChanged,
+    double width = 170,
+  }) {
+    final validValue = items.contains(value)
+        ? value
+        : (items.isNotEmpty ? items.first : null);
+
+    return SizedBox(
+      width: width,
+      child: DropdownButtonFormField<String>(
+        isExpanded: true,
+        value: validValue,
+        items: items
+            .map(
+              (s) => DropdownMenuItem<String>(
+                value: s,
+                child: Text(
+                  s,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: _textMain),
+                ),
+              ),
+            )
+            .toList(),
+        onChanged: (v) {
+          if (v != null) onChanged(v);
+        },
+        decoration: _inputDecoration(label),
       ),
     );
   }
@@ -903,88 +1050,25 @@ class _GeneralCommSlab {
   }
 }
 
-class _GeneralPolicyRow extends StatelessWidget {
+class _AgriculturePolicyGridCard extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> doc;
   final int serialNumber;
   final VoidCallback onTap;
 
-  const _GeneralPolicyRow({
+  const _AgriculturePolicyGridCard({
     required this.doc,
     required this.serialNumber,
     required this.onTap,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final data = doc.data();
-    final companyName = (data['companyName'] ?? '').toString();
-    final slabs = _slabCount(data);
-    final status = (data['status'] ?? 'Active').toString();
-    final statusColor = status.toLowerCase().contains('active')
-        ? const Color(0xFF16A34A)
-        : const Color(0xFFF59E0B);
+  State<_AgriculturePolicyGridCard> createState() =>
+      _AgriculturePolicyGridCardState();
+}
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _AgriculturalPoliciesTabState._surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _AgriculturalPoliciesTabState._border),
-        ),
-        child: Row(
-          children: [
-            ListSerialNumber(number: serialNumber),
-            const SizedBox(width: 10),
-            CompanyLogo(
-              companyName: companyName,
-              customLogoUrl: data['companyLogoUrl']?.toString(),
-              size: 42,
-              radius: 9,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    (data['planName'] ?? 'Agricultural Policy').toString(),
-                    style: const TextStyle(
-                      color: _AgriculturalPoliciesTabState._textMain,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${data['companyName'] ?? '-'}  |  ${data['policyCode'] ?? '-'}',
-                    style: const TextStyle(
-                      color: _AgriculturalPoliciesTabState._textMuted,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            _MiniPill(
-              label: '$slabs slabs',
-              color: _AgriculturalPoliciesTabState._primary,
-            ),
-            const SizedBox(width: 8),
-            _MiniPill(label: status, color: statusColor),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: _AgriculturalPoliciesTabState._textMuted,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+class _AgriculturePolicyGridCardState
+    extends State<_AgriculturePolicyGridCard> {
+  bool _isHovered = false;
 
   static int _slabCount(Map<String, dynamic> data) {
     final groups = data['agriculturalCommissions'];
@@ -996,6 +1080,150 @@ class _GeneralPolicyRow extends StatelessWidget {
       }
     }
     return count;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.doc.data();
+    final companyName = (data['companyName'] ?? '').toString();
+    final planName = (data['planName'] ?? 'Agriculture Policy').toString();
+    final policyCode = (data['policyCode'] ?? '').toString();
+    final slabs = _slabCount(data);
+    final status = (data['status'] ?? 'Active').toString();
+    final isActive = status.toLowerCase().contains('active');
+    final statusColor = isActive
+        ? const Color(0xFF16A34A)
+        : const Color(0xFFF59E0B);
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: _AgriculturePoliciesTabState._surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _isHovered
+                  ? _AgriculturePoliciesTabState._accent
+                  : _AgriculturePoliciesTabState._border,
+              width: _isHovered ? 1.5 : 1.0,
+            ),
+            boxShadow: [
+              if (_isHovered)
+                BoxShadow(
+                  color: _AgriculturePoliciesTabState._accent.withValues(
+                    alpha: 0.08,
+                  ),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                )
+              else
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: -8,
+                left: -8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _AgriculturePoliciesTabState._bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _AgriculturePoliciesTabState._border,
+                    ),
+                  ),
+                  child: Text(
+                    '#${widget.serialNumber}',
+                    style: const TextStyle(
+                      color: _AgriculturePoliciesTabState._textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: -8,
+                right: -8,
+                child: _MiniPill(label: status, color: statusColor),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(width: 4),
+                  CompanyLogo(
+                    companyName: companyName,
+                    customLogoUrl: data['companyLogoUrl']?.toString(),
+                    size: 64,
+                    radius: 12,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          companyName.isNotEmpty ? companyName : '-',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _AgriculturePoliciesTabState._textMain,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          planName,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _AgriculturePoliciesTabState._textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          policyCode.isNotEmpty
+                              ? '$policyCode  |  $slabs slabs'
+                              : '$slabs slabs',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _AgriculturePoliciesTabState._textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1018,12 +1246,12 @@ class _GeneralPolicyDetailView extends StatelessWidget {
     final groups = data['agriculturalCommissions'];
 
     return Scaffold(
-      backgroundColor: _AgriculturalPoliciesTabState._bg,
+      backgroundColor: _AgriculturePoliciesTabState._bg,
       body: SafeArea(
         child: Column(
           children: [
             Container(
-              color: _AgriculturalPoliciesTabState._surface,
+              color: _AgriculturePoliciesTabState._surface,
               padding: const EdgeInsets.fromLTRB(16, 14, 18, 14),
               child: Row(
                 children: [
@@ -1038,10 +1266,9 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          (data['planName'] ?? 'Agricultural Policy')
-                              .toString(),
+                          (data['planName'] ?? 'Agriculture Policy').toString(),
                           style: const TextStyle(
-                            color: _AgriculturalPoliciesTabState._textMain,
+                            color: _AgriculturePoliciesTabState._textMain,
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
                           ),
@@ -1051,7 +1278,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                           companyName: (data['companyName'] ?? '-').toString(),
                           logoSize: 18,
                           style: const TextStyle(
-                            color: _AgriculturalPoliciesTabState._textMuted,
+                            color: _AgriculturePoliciesTabState._textMuted,
                             fontSize: 12,
                           ),
                         ),
@@ -1069,7 +1296,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                     icon: const Icon(Icons.delete_outline_rounded, size: 16),
                     label: const Text('Delete'),
                     style: TextButton.styleFrom(
-                      foregroundColor: _AgriculturalPoliciesTabState._red,
+                      foregroundColor: _AgriculturePoliciesTabState._red,
                     ),
                   ),
                 ],
@@ -1077,7 +1304,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
             ),
             const Divider(
               height: 1,
-              color: _AgriculturalPoliciesTabState._border,
+              color: _AgriculturePoliciesTabState._border,
             ),
             Expanded(
               child: ListView(
@@ -1122,7 +1349,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                         const Text(
                           'Policy Details',
                           style: TextStyle(
-                            color: _AgriculturalPoliciesTabState._textMain,
+                            color: _AgriculturePoliciesTabState._textMain,
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                           ),
@@ -1142,7 +1369,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                         const Text(
                           'Commission Slabs',
                           style: TextStyle(
-                            color: _AgriculturalPoliciesTabState._textMain,
+                            color: _AgriculturePoliciesTabState._textMain,
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                           ),
@@ -1152,7 +1379,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
                           const Text(
                             'No general slabs configured.',
                             style: TextStyle(
-                              color: _AgriculturalPoliciesTabState._textMuted,
+                              color: _AgriculturePoliciesTabState._textMuted,
                             ),
                           )
                         else
@@ -1175,14 +1402,14 @@ class _GeneralPolicyDetailView extends StatelessWidget {
     if (slabs is! List || slabs.isEmpty) {
       return const Text(
         'No slabs found.',
-        style: TextStyle(color: _AgriculturalPoliciesTabState._textMuted),
+        style: TextStyle(color: _AgriculturePoliciesTabState._textMuted),
       );
     }
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
         headingRowColor: WidgetStatePropertyAll(
-          _AgriculturalPoliciesTabState._primary.withValues(alpha: 0.06),
+          _AgriculturePoliciesTabState._primary.withValues(alpha: 0.06),
         ),
         columns: const [
           DataColumn(label: Text('Slab / Category')),
@@ -1216,7 +1443,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
             child: Text(
               label,
               style: const TextStyle(
-                color: _AgriculturalPoliciesTabState._textMuted,
+                color: _AgriculturePoliciesTabState._textMuted,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
@@ -1226,7 +1453,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
             child: Text(
               text.isEmpty ? '-' : text,
               style: const TextStyle(
-                color: _AgriculturalPoliciesTabState._textMain,
+                color: _AgriculturePoliciesTabState._textMain,
                 fontSize: 13,
               ),
             ),
@@ -1250,7 +1477,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _AgriculturalPoliciesTabState._red,
+              backgroundColor: _AgriculturePoliciesTabState._red,
               foregroundColor: Colors.white,
             ),
             child: const Text('Delete'),
@@ -1261,14 +1488,14 @@ class _GeneralPolicyDetailView extends StatelessWidget {
     if (ok != true) return;
 
     final data = doc.data();
-    final deletedPlanName = (data['planName'] ?? 'Agricultural Policy')
+    final deletedPlanName = (data['planName'] ?? 'Agriculture Policy')
         .toString();
     await FirebaseFirestore.instance
         .collection('agricultural_policies')
         .doc(doc.id)
         .delete();
     await AuditLogService.write(
-      page: 'Agricultural Policies',
+      page: 'Agriculture Policies',
       action: 'Deleted Policy',
       description: 'Deleted general policy "$deletedPlanName".',
       targetId: doc.id,
@@ -1280,7 +1507,7 @@ class _GeneralPolicyDetailView extends StatelessWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Policy deleted'),
-          backgroundColor: _AgriculturalPoliciesTabState._primary,
+          backgroundColor: _AgriculturePoliciesTabState._primary,
         ),
       );
       onDeleted();
@@ -1305,9 +1532,9 @@ class _InfoCard extends StatelessWidget {
       width: 210,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _AgriculturalPoliciesTabState._surface,
+        color: _AgriculturePoliciesTabState._surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _AgriculturalPoliciesTabState._border),
+        border: Border.all(color: _AgriculturePoliciesTabState._border),
       ),
       child: Row(
         children: [
@@ -1315,14 +1542,14 @@ class _InfoCard extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: _AgriculturalPoliciesTabState._accent.withValues(
+              color: _AgriculturePoliciesTabState._accent.withValues(
                 alpha: 0.1,
               ),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               icon,
-              color: _AgriculturalPoliciesTabState._accent,
+              color: _AgriculturePoliciesTabState._accent,
               size: 20,
             ),
           ),
@@ -1336,7 +1563,7 @@ class _InfoCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _AgriculturalPoliciesTabState._textMain,
+                    color: _AgriculturePoliciesTabState._textMain,
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1344,7 +1571,7 @@ class _InfoCard extends StatelessWidget {
                 Text(
                   title,
                   style: const TextStyle(
-                    color: _AgriculturalPoliciesTabState._textMuted,
+                    color: _AgriculturePoliciesTabState._textMuted,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1368,9 +1595,9 @@ class _Panel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _AgriculturalPoliciesTabState._surface,
+        color: _AgriculturePoliciesTabState._surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _AgriculturalPoliciesTabState._border),
+        border: Border.all(color: _AgriculturePoliciesTabState._border),
       ),
       child: child,
     );

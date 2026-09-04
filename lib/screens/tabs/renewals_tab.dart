@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../utils/audit_log_service.dart';
+import '../../utils/lead_serial_fields.dart';
+import '../../widgets/auto_hide_controls.dart';
 import '../../widgets/company_logo.dart';
 
 class RenewalsTab extends StatefulWidget {
@@ -54,14 +56,25 @@ class _RenewalsTabState extends State<RenewalsTab> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String _filter = 'all';
+  String _sectionFilter = 'All';
   String _sortBy = 'policyEndDate';
   bool _sortAsc = true;
+
+  static const List<String> _sectionFilters = [
+    'All',
+    'Health',
+    'Life',
+    'General',
+    'ECGC',
+    'Agriculture',
+  ];
 
   final List<_SortOption> _sortOptions = const [
     _SortOption('policyEndDate', 'Expiry Date', 'Oldest', 'Newest'),
     _SortOption('policyStartDate', 'Active Date', 'Oldest', 'Newest'),
     _SortOption('customerName', 'Customer', 'A→Z', 'Z→A'),
     _SortOption('policyName', 'Policy', 'A→Z', 'Z→A'),
+    _SortOption('policyNumber', 'Policy No.', 'A→Z', 'Z→A'),
   ];
 
   static const _columns = [
@@ -70,7 +83,8 @@ class _RenewalsTabState extends State<RenewalsTab> {
     _ColDef('Mobile', 110, Alignment.centerLeft),
     _ColDef('Company', 175, Alignment.centerLeft),
     _ColDef('Policy Name', 170, Alignment.centerLeft),
-    _ColDef('Code', 120, Alignment.centerLeft),
+    _ColDef('Policy No.', 130, Alignment.centerLeft),
+    _ColDef('Unique ID', 120, Alignment.centerLeft),
     _ColDef('Active Date', 105, Alignment.center),
     _ColDef('Expiry Date', 105, Alignment.center),
     _ColDef('Status', 95, Alignment.center),
@@ -133,6 +147,19 @@ class _RenewalsTabState extends State<RenewalsTab> {
     return raw.isEmpty ? 'Upcoming' : raw[0].toUpperCase() + raw.substring(1);
   }
 
+  String _categoryKey(String value) {
+    final key = value.trim().toLowerCase();
+    return key == 'agricultural' ? 'agriculture' : key;
+  }
+
+  String _policyCategory(Map<String, dynamic> data) =>
+      (data['category'] ??
+              data['customerCategory'] ??
+              data['policyCategory'] ??
+              data['section'] ??
+              '')
+          .toString();
+
   Color _statusColor(String status) {
     switch (status.toLowerCase()) {
       case 'renewed':
@@ -180,6 +207,10 @@ class _RenewalsTabState extends State<RenewalsTab> {
       final renewalStatus = (data['renewalStatus'] ?? '')
           .toString()
           .toLowerCase();
+      if (_sectionFilter != 'All' &&
+          _categoryKey(_policyCategory(data)) != _categoryKey(_sectionFilter)) {
+        return false;
+      }
 
       if (_filter == 'expired' && !expired) return false;
       if (_filter == 'dueSoon' && (!dueSoon || renewalStatus == 'renewed')) {
@@ -187,9 +218,7 @@ class _RenewalsTabState extends State<RenewalsTab> {
       }
       if (_filter == 'renewed' && renewalStatus != 'renewed') return false;
       if (_filter == 'all' &&
-          !(expired ||
-              (dueSoon && renewalStatus != 'renewed') ||
-              renewalStatus == 'renewed')) {
+          !(renewalStatus != 'renewed' && (expired || dueSoon))) {
         return false;
       }
 
@@ -201,8 +230,11 @@ class _RenewalsTabState extends State<RenewalsTab> {
             (data['customerMobile'] ?? '').toString().toLowerCase().contains(
               q,
             ) ||
+            leadUniqueIdFromData(data).toLowerCase().contains(q) ||
             (data['policyName'] ?? '').toString().toLowerCase().contains(q) ||
+            (data['policyNumber'] ?? '').toString().toLowerCase().contains(q) ||
             (data['policyCode'] ?? '').toString().toLowerCase().contains(q) ||
+            _policyCategory(data).toLowerCase().contains(q) ||
             (data['companyName'] ?? '').toString().toLowerCase().contains(q) ||
             (data['notes'] ?? '').toString().toLowerCase().contains(q) ||
             (data['renewalNotes'] ?? '').toString().toLowerCase().contains(q);
@@ -216,10 +248,17 @@ class _RenewalsTabState extends State<RenewalsTab> {
       final db = b.data();
       int cmp = 0;
 
-      if (_sortBy == 'customerName' || _sortBy == 'policyName') {
-        cmp = (da[_sortBy] ?? '').toString().compareTo(
-          (db[_sortBy] ?? '').toString(),
-        );
+      if (_sortBy == 'customerName' ||
+          _sortBy == 'policyName' ||
+          _sortBy == 'policyNumber' ||
+          _sortBy == 'leadUniqueId') {
+        final av = _sortBy == 'leadUniqueId'
+            ? leadUniqueIdFromData(da)
+            : (da[_sortBy] ?? '').toString();
+        final bv = _sortBy == 'leadUniqueId'
+            ? leadUniqueIdFromData(db)
+            : (db[_sortBy] ?? '').toString();
+        cmp = av.compareTo(bv);
       } else {
         final ad = _toDate(da[_sortBy]);
         final bd = _toDate(db[_sortBy]);
@@ -244,99 +283,95 @@ class _RenewalsTabState extends State<RenewalsTab> {
   Widget build(BuildContext context) {
     return Container(
       color: _bg,
-      child: Column(
-        children: [
-          _buildTopBar(),
-          const Divider(height: 1, color: _border),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('customers')
-                  .snapshots(),
-              builder: (context, customerSnap) {
-                if (customerSnap.connectionState == ConnectionState.waiting) {
+      child: AutoHideControlsRegion(
+        controls: _buildTopBar(),
+        divider: const Divider(height: 1, color: _border),
+        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('customers')
+              .snapshots(),
+          builder: (context, customerSnap) {
+            if (customerSnap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: _primary),
+              );
+            }
+            final customers = customerSnap.data?.docs ?? [];
+            final myCustomerIds = <String>{};
+            for (final c in customers) {
+              if (_belongsToCurrentEmployee(c.data())) {
+                myCustomerIds.add(c.id);
+              }
+            }
+
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _stream(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(color: _primary),
                   );
                 }
-                final customers = customerSnap.data?.docs ?? [];
-                final myCustomerIds = <String>{};
-                for (final c in customers) {
-                  if (_belongsToCurrentEmployee(c.data())) {
-                    myCustomerIds.add(c.id);
-                  }
+                if (snap.hasError) {
+                  return Center(
+                    child: Text(
+                      'Error: ${snap.error}',
+                      style: const TextStyle(color: _danger),
+                    ),
+                  );
                 }
 
-                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _stream(),
-                  builder: (context, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: CircularProgressIndicator(color: _primary),
-                      );
-                    }
-                    if (snap.hasError) {
-                      return Center(
-                        child: Text(
-                          'Error: ${snap.error}',
-                          style: const TextStyle(color: _danger),
-                        ),
-                      );
-                    }
+                final docs = _process(snap.data?.docs ?? [], myCustomerIds);
+                if (docs.isEmpty) return _emptyState();
 
-                    final docs = _process(snap.data?.docs ?? [], myCustomerIds);
-                    if (docs.isEmpty) return _emptyState();
-
-                    return Column(
-                      children: [
-                        Container(
-                          color: _surface,
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                          child: Row(
+                return Column(
+                  children: [
+                    Container(
+                      color: _surface,
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      child: Row(
+                        children: [
+                          Text(
+                            '${docs.length} renewal record${docs.length == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                              color: _textMuted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          _chip('Expired', _danger),
+                          const SizedBox(width: 8),
+                          _chip('Due Soon 60d', _warning),
+                          const SizedBox(width: 8),
+                          _chip('Renewed', _success),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: _border),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.vertical,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '${docs.length} renewal record${docs.length == 1 ? '' : 's'}',
-                                style: const TextStyle(
-                                  color: _textMuted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              _tableHeader(),
+                              ...docs.asMap().entries.map(
+                                (e) => _tableRow(context, e.key, e.value),
                               ),
-                              const Spacer(),
-                              _chip('Expired', _danger),
-                              const SizedBox(width: 8),
-                              _chip('Due Soon 60d', _warning),
-                              const SizedBox(width: 8),
-                              _chip('Renewed', _success),
                             ],
                           ),
                         ),
-                        const Divider(height: 1, color: _border),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _tableHeader(),
-                                  ...docs.asMap().entries.map(
-                                    (e) => _tableRow(context, e.key, e.value),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                      ),
+                    ),
+                  ],
                 );
               },
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -451,6 +486,20 @@ class _RenewalsTabState extends State<RenewalsTab> {
             ],
           ),
           const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _sectionFilters
+                  .map(
+                    (section) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _sectionButton(section),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -513,6 +562,40 @@ class _RenewalsTabState extends State<RenewalsTab> {
             fontSize: 11,
             fontWeight: FontWeight.w700,
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionButton(String label) {
+    final active = _sectionFilter == label;
+    return GestureDetector(
+      onTap: () => setState(() => _sectionFilter = label),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        decoration: BoxDecoration(
+          color: active ? _primary.withValues(alpha: 0.1) : _bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: active ? _primary.withValues(alpha: 0.35) : _border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (active) ...[
+              const Icon(Icons.check_rounded, size: 15, color: _primaryDark),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? _primaryDark : _textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -650,12 +733,14 @@ class _RenewalsTabState extends State<RenewalsTab> {
         return 'customerName';
       case 'Policy':
         return 'policyName';
+      case 'Policy No.':
+        return 'policyNumber';
       case 'Mobile':
         return 'customerMobile';
       case 'Company':
         return 'companyName';
-      case 'Code':
-        return 'policyCode';
+      case 'Unique ID':
+        return 'leadUniqueId';
       case 'Active Date':
         return 'policyStartDate';
       case 'Expiry Date':
@@ -679,6 +764,8 @@ class _RenewalsTabState extends State<RenewalsTab> {
     final note = (data['renewalNotes'] ?? data['notes'] ?? '')
         .toString()
         .trim();
+    final uniqueId = leadUniqueIdFromData(data);
+    final policyNumber = (data['policyNumber'] ?? '').toString().trim();
 
     return InkWell(
       onTap: () => _showRenewalDetails(context, doc.id, data),
@@ -730,7 +817,18 @@ class _RenewalsTabState extends State<RenewalsTab> {
               clip: true,
             ),
             _cell(
-              data['policyCode'] ?? '-',
+              policyNumber.isEmpty ? '-' : policyNumber,
+              130,
+              Alignment.centerLeft,
+              style: const TextStyle(
+                color: _textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              clip: true,
+            ),
+            _cell(
+              uniqueId.isEmpty ? '-' : uniqueId,
               120,
               Alignment.centerLeft,
               style: const TextStyle(color: _textMuted, fontSize: 11),
@@ -1159,7 +1257,13 @@ class _RenewalsTabState extends State<RenewalsTab> {
                     _detailRow('Mobile', data['customerMobile'] ?? '-'),
                     _detailRow('Company', data['companyName'] ?? '-'),
                     _detailRow('Policy Name', data['policyName'] ?? '-'),
-                    _detailRow('Policy Code', data['policyCode'] ?? '-'),
+                    _detailRow('Policy No.', data['policyNumber'] ?? '-'),
+                    _detailRow(
+                      'Unique ID',
+                      leadUniqueIdFromData(data).isEmpty
+                          ? '-'
+                          : leadUniqueIdFromData(data),
+                    ),
                     _detailRow('Active Date', _fmt(data['policyStartDate'])),
                     _detailRow('Expiry Date', _fmt(data['policyEndDate'])),
                     _detailRow('Notes', note.isEmpty ? 'No notes added' : note),

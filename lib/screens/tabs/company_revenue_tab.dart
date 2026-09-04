@@ -2,6 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../../utils/audit_log_service.dart';
+import '../../utils/lead_serial_fields.dart';
+import '../../utils/pdf_download.dart';
+import '../../utils/revenue_invoice_pdf.dart';
 
 class CompanyRevenueTab extends StatefulWidget {
   final String category;
@@ -26,7 +29,7 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
   static const _green = Color(0xFF15803D);
   static const _orange = Color(0xFFB45309);
 
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _policiesStream;
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _policiesStream;
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _cachedDocs = const [];
   final Set<String> _selectedIds = <String>{};
 
@@ -43,10 +46,39 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
   @override
   void initState() {
     super.initState();
-    _policiesStream = FirebaseFirestore.instance
-        .collection('customer_policies')
-        .where('category', isEqualTo: widget.category)
-        .snapshots();
+    _policiesStream = _buildPolicyStream();
+  }
+
+  @override
+  void didUpdateWidget(covariant CompanyRevenueTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_categoryKey(oldWidget.category) != _categoryKey(widget.category)) {
+      _policiesStream = _buildPolicyStream();
+      _cachedDocs = const [];
+      _draftCompanyId = null;
+      _draftStart = null;
+      _draftEnd = null;
+      _appliedCompanyId = null;
+      _appliedStart = null;
+      _appliedEnd = null;
+      _selectedIds.clear();
+      _filtersExpanded = true;
+    }
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _buildPolicyStream() {
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection(
+      'customer_policies',
+    );
+    if (_categoryKey(widget.category) == 'agriculture') {
+      query = query.where(
+        'category',
+        whereIn: const ['Agriculture', 'Agricultural'],
+      );
+    } else {
+      query = query.where('category', isEqualTo: widget.category);
+    }
+    return query.snapshots();
   }
 
   static double _number(dynamic value) {
@@ -77,6 +109,54 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
     return '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
   }
 
+  static String _safeInvoicePrefix(String raw, String companyName) {
+    var value = raw.trim().toUpperCase();
+    value = value.replaceFirst(RegExp(r'[-/]\d+$'), '');
+    value = value.replaceAll(RegExp(r'[^A-Z0-9_/]+'), '_');
+    value = value.replaceAll(RegExp(r'_+'), '_');
+    value = value.replaceAll(RegExp(r'/+'), '/');
+    value = value.replaceAll(RegExp(r'^_+|_+$'), '');
+    if (value.isNotEmpty) return value;
+    final initials = companyName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+    return 'MAKK_${initials.isEmpty ? 'INV' : initials}';
+  }
+
+  Future<({String invoiceNo, int invoiceCount, Map<String, dynamic> company})>
+  _nextInvoiceIdentity({
+    required FirebaseFirestore db,
+    required String companyId,
+    required String companyName,
+  }) {
+    final companyRef = db.collection('insurance_companies').doc(companyId);
+    return db.runTransaction((transaction) async {
+      final snap = await transaction.get(companyRef);
+      final company = snap.data() ?? <String, dynamic>{};
+      final prefix = _safeInvoicePrefix(
+        (company['invoiceCode'] ?? company['invoiceCodePrefix'] ?? '')
+            .toString(),
+        companyName,
+      );
+      final next = ((company['invoiceCount'] as num?)?.toInt() ?? 0) + 1;
+      final invoiceSerial = next.toString().padLeft(3, '0');
+      final separator = prefix.endsWith('/') ? '' : '-';
+      final invoiceNo = '$prefix$separator$invoiceSerial';
+      transaction.set(companyRef, {
+        'invoiceCode': prefix,
+        'invoiceCodePrefix': prefix,
+        'invoiceCount': next,
+        'lastInvoiceNo': invoiceNo,
+        'lastInvoiceGeneratedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      return (invoiceNo: invoiceNo, invoiceCount: next, company: company);
+    });
+  }
+
   static String _money(double value) =>
       'Rs ${value.toStringAsFixed(2).replaceFirst(RegExp(r'\.00$'), '')}';
 
@@ -87,9 +167,14 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
     return '$text%';
   }
 
+  static String _categoryKey(String value) {
+    final key = value.trim().toLowerCase();
+    return key == 'agricultural' ? 'agriculture' : key;
+  }
+
   bool _belongsToCategory(Map<String, dynamic> data) =>
-      (data['category'] ?? '').toString().trim().toLowerCase() ==
-      widget.category.toLowerCase();
+      _categoryKey((data['category'] ?? '').toString()) ==
+      _categoryKey(widget.category);
 
   DateTime? _recordDate(Map<String, dynamic> data) =>
       _date(data['issueDate']) ??
@@ -220,6 +305,16 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
         ..addAll(
           docs.where((doc) => _isFrozen(doc.data())).map((doc) => doc.id),
         );
+    });
+  }
+
+  void _unselectVisible(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    setState(() {
+      for (final doc in docs) {
+        _selectedIds.remove(doc.id);
+      }
     });
   }
 
@@ -435,21 +530,43 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
     setState(() => _busy = true);
     try {
       final db = FirebaseFirestore.instance;
-      final reportRef = db.collection('reports').doc();
+      final invoiceRef = db.collection('invoices').doc();
       final now = DateTime.now();
       final companyName = (selected.first.data()['companyName'] ?? 'Company')
           .toString();
+      final companyId =
+          _appliedCompanyId ??
+          (selected.first.data()['companyId'] ?? '').toString();
+      if (companyId.trim().isEmpty) {
+        _toast('Select a company before generating invoice.');
+        return;
+      }
+      final invoiceIdentity = await _nextInvoiceIdentity(
+        db: db,
+        companyId: companyId,
+        companyName: companyName,
+      );
+      final company = invoiceIdentity.company;
       final taxable = selected.fold<double>(
         0,
         (total, doc) => total + _commissionAmount(doc.data()),
       );
       final invoice = {
-        'invoiceNo':
-            'REV/${now.year}/${reportRef.id.substring(0, 6).toUpperCase()}',
+        'invoiceNo': invoiceIdentity.invoiceNo,
+        'invoiceCode': _safeInvoicePrefix(
+          (company['invoiceCode'] ?? company['invoiceCodePrefix'] ?? '')
+              .toString(),
+          companyName,
+        ),
+        'invoiceCount': invoiceIdentity.invoiceCount,
         'invoiceDate': _isoDate(now),
-        'companyId': _appliedCompanyId,
+        'companyId': companyId,
         'companyName': companyName,
         'billedTo': companyName,
+        'billedToAddress': (company['headOfficeAddress'] ?? '').toString(),
+        'billedToGstin':
+            (company['gstin'] ?? company['gstIn'] ?? company['gstNumber'] ?? '')
+                .toString(),
         'category': widget.category,
         'periodStart': _isoDate(_appliedStart),
         'periodEnd': _isoDate(_appliedEnd),
@@ -482,21 +599,27 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
           };
         }).toList(),
       };
-      await reportRef.set({
+      await invoiceRef.set({
         'type': 'Revenue Invoice',
+        'invoiceNo': invoice['invoiceNo'],
+        'invoiceCode': invoice['invoiceCode'],
+        'invoiceCount': invoice['invoiceCount'],
         'title': 'Invoice ${invoice['invoiceNo']} - $companyName',
-        'month': '${_dateLabel(_appliedStart)} to ${_dateLabel(_appliedEnd)}',
-        'scope': companyName,
+        'companyId': companyId,
+        'companyName': companyName,
         'category': widget.category,
+        'periodStart': invoice['periodStart'],
+        'periodEnd': invoice['periodEnd'],
+        'invoiceDate': invoice['invoiceDate'],
+        'includeGst': _includeGst,
+        'taxableValue': invoice['taxableValue'],
+        'totalGst': invoice['totalGst'],
+        'totalInvoiceValue': invoice['totalInvoiceValue'],
+        'status': 'generated',
+        'policyIds': selected.map((doc) => doc.id).toList(),
+        'payload': {'invoice': invoice, 'rows': invoice['rows']},
         'createdAt': FieldValue.serverTimestamp(),
-        'payload': {
-          'premium': invoice['taxableValue'],
-          'policiesCount': selected.length,
-          'totalCommission': invoice['taxableValue'],
-          'status': 'invoice_frozen',
-          'invoice': invoice,
-          'rows': invoice['rows'],
-        },
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       final batch = db.batch();
@@ -507,22 +630,30 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
           'invoiceFrozen': true,
           'settlementStatus': 'invoice_frozen',
           'invoiceFrozenAt': FieldValue.serverTimestamp(),
-          'invoiceReportId': reportRef.id,
+          'invoiceId': invoiceRef.id,
           'invoiceNo': invoice['invoiceNo'],
+          'invoiceCode': invoice['invoiceCode'],
+          'invoiceCount': invoice['invoiceCount'],
           'invoiceIncludesGst': _includeGst,
         });
       }
       await batch.commit();
+      final pdfBytes = await RevenueInvoicePdf.build(invoice);
+      await downloadPdfFile(
+        bytes: pdfBytes,
+        filename: '${invoice['invoiceNo']}.pdf',
+      );
       await AuditLogService.write(
         page: widget.title,
         action: 'generate_invoice_freeze',
         description:
             'Invoice ${invoice['invoiceNo']} generated and ${selected.length} policies frozen.',
-        targetId: reportRef.id,
-        targetType: 'report',
+        targetId: invoiceRef.id,
+        targetType: 'invoice',
         targetName: companyName,
         extra: {
           'invoiceNo': invoice['invoiceNo'],
+          'invoiceId': invoiceRef.id,
           'policyIds': selected.map((doc) => doc.id).toList(),
           'taxableValue': invoice['taxableValue'],
           'totalInvoiceValue': invoice['totalInvoiceValue'],
@@ -536,7 +667,7 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
         });
       }
       _toast(
-        'Invoice generated in Reports. Selected customers are frozen; select frozen customers next and mark settled.',
+        'Invoice ${invoice['invoiceNo']} generated, downloaded, and added to Account Management.',
       );
       return;
     } catch (error) {
@@ -924,8 +1055,12 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
               label: Text('Select frozen ($frozenCount)'),
             ),
             OutlinedButton(
+              onPressed: _busy ? null : () => _unselectVisible(docs),
+              child: const Text('Unselect visible'),
+            ),
+            OutlinedButton(
               onPressed: _busy ? null : () => setState(_selectedIds.clear),
-              child: const Text('Clear'),
+              child: const Text('Clear all'),
             ),
             SwitchListTile.adaptive(
               dense: true,
@@ -976,12 +1111,14 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
               actions[1],
               const SizedBox(width: 8),
               actions[2],
-              const SizedBox(width: 14),
-              SizedBox(width: 250, child: actions[3]),
-              const Spacer(),
-              actions[5],
               const SizedBox(width: 8),
-              actions[4],
+              actions[3],
+              const SizedBox(width: 14),
+              SizedBox(width: 250, child: actions[4]),
+              const Spacer(),
+              actions[6],
+              const SizedBox(width: 8),
+              actions[5],
             ],
           );
         },
@@ -1001,6 +1138,7 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
               columns: const [
                 DataColumn(label: Text('Select')),
                 DataColumn(label: Text('Customer')),
+                DataColumn(label: Text('Unique ID')),
                 DataColumn(label: Text('Policy No.')),
                 DataColumn(label: Text('Product')),
                 DataColumn(label: Text('Date')),
@@ -1033,6 +1171,13 @@ class _CompanyRevenueTabState extends State<CompanyRevenueTab> {
                       ),
                     ),
                     DataCell(Text((data['customerName'] ?? '-').toString())),
+                    DataCell(
+                      Text(
+                        leadUniqueIdFromData(data).isEmpty
+                            ? '-'
+                            : leadUniqueIdFromData(data),
+                      ),
+                    ),
                     DataCell(Text((data['policyNumber'] ?? '-').toString())),
                     DataCell(
                       Text(

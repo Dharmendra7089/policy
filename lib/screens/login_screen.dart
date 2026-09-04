@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'home_screen.dart';
 
@@ -60,13 +61,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
   Future<Map<String, dynamic>?> _employeeProfile(User user) async {
     final normalizedEmail = user.email?.trim().toLowerCase() ?? '';
     for (final collection in const ['admins', 'agents']) {
@@ -105,6 +99,13 @@ class _LoginScreenState extends State<LoginScreen> {
       };
     }
     return null;
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   bool _isActive(Map<String, dynamic> profile) {
@@ -156,11 +157,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final provider = GoogleAuthProvider()
-        ..setCustomParameters({'prompt': 'select_account'});
       final credential = kIsWeb
-          ? await FirebaseAuth.instance.signInWithPopup(provider)
-          : await FirebaseAuth.instance.signInWithProvider(provider);
+          ? await FirebaseAuth.instance.signInWithPopup(
+              GoogleAuthProvider()
+                ..setCustomParameters({'prompt': 'select_account'}),
+            )
+          : await _signInWithNativeGoogle();
       final user = credential.user;
       if (user == null) {
         throw const _AccessException(
@@ -177,7 +179,9 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       await FirebaseAuth.instance.signOut();
-      if (mounted) setState(() => _errorMessage = _authMessage(error.code));
+      if (mounted) {
+        setState(() => _errorMessage = _authMessage(error.code, error.message));
+      }
     } catch (_) {
       await FirebaseAuth.instance.signOut();
       if (mounted) {
@@ -190,11 +194,27 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<UserCredential> _signInWithNativeGoogle() async {
+    final googleSignIn = GoogleSignIn(scopes: const ['email', 'profile']);
+    await googleSignIn.signOut();
+    final account = await googleSignIn.signIn();
+    if (account == null) {
+      throw const _AccessException('Google Sign-In was cancelled.');
+    }
+
+    final auth = await account.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: auth.accessToken,
+      idToken: auth.idToken,
+    );
+    return FirebaseAuth.instance.signInWithCredential(credential);
+  }
+
   Future<void> _signInWithCredentials() async {
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text;
     if (email.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Enter your email and password.');
+      setState(() => _errorMessage = 'Enter email ID and password.');
       return;
     }
 
@@ -217,7 +237,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _errorMessage = error.message);
     } on FirebaseAuthException catch (error) {
       await FirebaseAuth.instance.signOut();
-      if (mounted) setState(() => _errorMessage = _authMessage(error.code));
+      if (mounted) {
+        setState(() => _errorMessage = _authMessage(error.code, error.message));
+      }
     } catch (_) {
       await FirebaseAuth.instance.signOut();
       if (mounted) {
@@ -237,21 +259,25 @@ class _LoginScreenState extends State<LoginScreen> {
     'canceled',
   }.contains(code);
 
-  String _authMessage(String code) => switch (code) {
-    'operation-not-allowed' =>
-      'This sign-in method is not enabled for this Firebase project.',
-    'invalid-credential' ||
-    'wrong-password' ||
-    'user-not-found' => 'Incorrect email or password.',
-    'invalid-email' => 'Enter a valid email address.',
-    'user-disabled' => 'This login has been disabled. Contact an admin.',
-    'account-exists-with-different-credential' =>
-      'This email already uses another sign-in method. Contact an admin.',
-    'network-request-failed' =>
-      'Network connection failed. Check your internet and try again.',
-    'too-many-requests' => 'Too many attempts. Wait a moment and try again.',
-    _ => 'Sign-in failed ($code). Please try again.',
-  };
+  String _authMessage(String code, [String? message]) {
+    final detail = (message ?? '').trim();
+    final suffix = detail.isEmpty ? '' : ' $detail';
+    return switch (code) {
+      'operation-not-allowed' =>
+        'This sign-in method is not enabled for this Firebase project.',
+      'invalid-credential' ||
+      'wrong-password' ||
+      'user-not-found' => 'Incorrect email ID or password.',
+      'invalid-email' => 'Enter a valid email ID.',
+      'user-disabled' => 'This login has been disabled. Contact an admin.',
+      'account-exists-with-different-credential' =>
+        'This email already uses another sign-in method. Contact an admin.',
+      'network-request-failed' =>
+        'Network connection failed. Check your internet and try again.',
+      'too-many-requests' => 'Too many attempts. Wait a moment and try again.',
+      _ => 'Sign-in failed ($code).$suffix',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -261,6 +287,10 @@ class _LoginScreenState extends State<LoginScreen> {
         body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
+
+    final size = MediaQuery.sizeOf(context);
+    final compact = size.width < 520;
+    final verySmall = size.width < 370;
 
     return Scaffold(
       body: Container(
@@ -287,14 +317,22 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               Center(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? 14 : 24,
+                    vertical: compact ? 12 : 24,
+                  ),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 450),
+                    constraints: BoxConstraints(maxWidth: compact ? 390 : 450),
                     child: Container(
-                      padding: const EdgeInsets.fromLTRB(34, 32, 34, 30),
+                      padding: EdgeInsets.fromLTRB(
+                        compact ? 18 : 34,
+                        compact ? 18 : 32,
+                        compact ? 18 : 34,
+                        compact ? 18 : 30,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(compact ? 18 : 24),
                         boxShadow: const [
                           BoxShadow(
                             color: Color(0x3300162D),
@@ -307,33 +345,38 @@ class _LoginScreenState extends State<LoginScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            height: 74,
-                            padding: const EdgeInsets.symmetric(horizontal: 18),
+                            height: compact ? 52 : 74,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: compact ? 10 : 18,
+                            ),
                             decoration: BoxDecoration(
                               color: _lightBlue,
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(14),
                             ),
                             child: Image.asset(
                               'assets/images/Makk-Finsol-logo.png',
                               fit: BoxFit.contain,
                             ),
                           ),
-                          const SizedBox(height: 28),
-                          const Text(
+                          SizedBox(height: compact ? 16 : 28),
+                          Text(
                             'Welcome to Makk Finsol',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: _text,
-                              fontSize: 25,
+                              fontSize: compact ? 20 : 25,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            'Sign in with the credentials provided by your administrator or use an approved Google account.',
+                          SizedBox(height: compact ? 6 : 10),
+                          Text(
+                            'Sign in with employee email ID and password, or continue with Google.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: _muted, height: 1.5),
+                            style: TextStyle(
+                              color: _muted,
+                              height: 1.35,
+                              fontSize: compact ? 12 : 14,
+                            ),
                           ),
                           if (_errorMessage != null) ...[
                             const SizedBox(height: 20),
@@ -366,7 +409,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ],
-                          const SizedBox(height: 24),
+                          SizedBox(height: compact ? 16 : 24),
                           TextField(
                             controller: _emailController,
                             enabled: !_signingIn,
@@ -374,19 +417,24 @@ class _LoginScreenState extends State<LoginScreen> {
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.username],
                             decoration: InputDecoration(
-                              labelText: 'Email address',
+                              labelText: 'Email ID',
                               prefixIcon: const Icon(
                                 Icons.alternate_email_rounded,
                               ),
                               filled: true,
                               fillColor: _lightBlue,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide.none,
+                              ),
+                              isDense: compact,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: compact ? 13 : 16,
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          SizedBox(height: compact ? 10 : 12),
                           TextField(
                             controller: _passwordController,
                             enabled: !_signingIn,
@@ -404,15 +452,20 @@ class _LoginScreenState extends State<LoginScreen> {
                               filled: true,
                               fillColor: _lightBlue,
                               border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(10),
                                 borderSide: BorderSide.none,
+                              ),
+                              isDense: compact,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: compact ? 13 : 16,
                               ),
                             ),
                           ),
-                          const SizedBox(height: 14),
+                          SizedBox(height: compact ? 12 : 14),
                           SizedBox(
                             width: double.infinity,
-                            height: 52,
+                            height: compact ? 46 : 52,
                             child: ElevatedButton(
                               onPressed: _signingIn
                                   ? null
@@ -446,7 +499,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                             ),
                           ),
-                          const SizedBox(height: 14),
+                          SizedBox(height: compact ? 11 : 14),
                           const Row(
                             children: [
                               Expanded(child: Divider()),
@@ -460,10 +513,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               Expanded(child: Divider()),
                             ],
                           ),
-                          const SizedBox(height: 14),
+                          SizedBox(height: compact ? 11 : 14),
                           SizedBox(
                             width: double.infinity,
-                            height: 48,
+                            height: compact ? 44 : 48,
                             child: OutlinedButton(
                               onPressed: _signingIn ? null : _signInWithGoogle,
                               style: OutlinedButton.styleFrom(
@@ -475,12 +528,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  _GoogleMark(),
-                                  SizedBox(width: 12),
-                                  Text(
+                                  const _GoogleMark(),
+                                  SizedBox(width: verySmall ? 8 : 12),
+                                  const Text(
                                     'Continue with Google',
                                     style: TextStyle(
                                       fontWeight: FontWeight.w800,
@@ -543,23 +596,59 @@ class _GoogleMark extends StatelessWidget {
   const _GoogleMark();
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 26,
-    height: 26,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: const Text(
-      'G',
-      style: TextStyle(
-        color: Color(0xFF4285F4),
-        fontSize: 17,
-        fontWeight: FontWeight.w900,
-      ),
-    ),
+  Widget build(BuildContext context) => const SizedBox(
+    width: 24,
+    height: 24,
+    child: CustomPaint(painter: _GoogleMarkPainter()),
   );
+}
+
+class _GoogleMarkPainter extends CustomPainter {
+  const _GoogleMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * 0.16;
+    final rect = Rect.fromLTWH(
+      stroke,
+      stroke,
+      size.width - stroke * 2,
+      size.height - stroke * 2,
+    );
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.square;
+
+    paint.color = const Color(0xFF4285F4);
+    canvas.drawArc(rect, -0.05, 1.45, false, paint);
+    paint.color = const Color(0xFF34A853);
+    canvas.drawArc(rect, 1.4, 1.25, false, paint);
+    paint.color = const Color(0xFFFBBC05);
+    canvas.drawArc(rect, 2.65, 1.15, false, paint);
+    paint.color = const Color(0xFFEA4335);
+    canvas.drawArc(rect, 3.8, 1.65, false, paint);
+
+    final barPaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.square;
+    final y = size.height * 0.5;
+    canvas.drawLine(
+      Offset(size.width * 0.52, y),
+      Offset(size.width * 0.88, y),
+      barPaint,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.88, y),
+      Offset(size.width * 0.88, size.height * 0.62),
+      barPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _AccessException implements Exception {

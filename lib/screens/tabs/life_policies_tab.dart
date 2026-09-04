@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/auto_hide_controls.dart';
 import '../../utils/audit_log_service.dart';
 import '../../widgets/company_logo.dart';
-import '../../widgets/list_serial_number.dart';
 
 // ─── Life Policies Revenue Tab ───────────────────────────────────────────────
 
@@ -96,72 +96,88 @@ class _LifePoliciesTabState extends State<LifePoliciesTab> {
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            const Divider(height: 1, color: _border),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: _accent),
-                    );
-                  }
-                  if (snap.hasError) {
-                    return Center(child: Text('Error: ${snap.error}'));
-                  }
-                  var docs = snap.data?.docs ?? [];
-                  if (_selectedSection != null) {
-                    docs = docs
-                        .where(
-                          (d) =>
-                              (d.data()['policySection'] ?? '')
-                                  .toString()
-                                  .trim() ==
-                              _selectedSection,
-                        )
-                        .toList();
-                  }
-                  if (_search.isNotEmpty) {
-                    docs = docs.where((d) {
-                      final data = d.data();
-                      return (data['planName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['policyCode'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['companyName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['policySection'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search);
-                    }).toList();
-                  }
-                  if (docs.isEmpty) return _buildEmpty(context);
-                  return ListView.separated(
-                    padding: const EdgeInsets.all(20),
-                    itemCount: docs.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _LifePolicyRow(
-                      doc: docs[i],
-                      serialNumber: i + 1,
-                      onTap: () => setState(() => _selectedDoc = docs[i]),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+        child: AutoHideControlsRegion(
+          controls: _buildHeader(context),
+          divider: const Divider(height: 1, color: _border),
+          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _stream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _accent),
+                );
+              }
+              if (snap.hasError) {
+                return Center(child: Text('Error: ${snap.error}'));
+              }
+              var docs = snap.data?.docs ?? [];
+              if (_selectedSection != null) {
+                docs = docs
+                    .where(
+                      (d) =>
+                          (d.data()['policySection'] ?? '').toString().trim() ==
+                          _selectedSection,
+                    )
+                    .toList();
+              }
+              if (_search.isNotEmpty) {
+                docs = docs.where((d) {
+                  final data = d.data();
+                  return (data['planName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['policyCode'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['companyName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['policySection'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search);
+                }).toList();
+              }
+              docs.sort(_comparePolicyCompanyThenPlan);
+              if (docs.isEmpty) return _buildEmpty(context);
+              return GridView.builder(
+                padding: const EdgeInsets.all(20),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 3.05,
+                ),
+                itemCount: docs.length,
+                itemBuilder: (context, i) => _LifePolicyGridCard(
+                  doc: docs[i],
+                  serialNumber: i + 1,
+                  onTap: () => setState(() => _selectedDoc = docs[i]),
+                ),
+              );
+            },
+          ),
         ),
       ),
+    );
+  }
+
+  static int _comparePolicyCompanyThenPlan(
+    QueryDocumentSnapshot<Map<String, dynamic>> a,
+    QueryDocumentSnapshot<Map<String, dynamic>> b,
+  ) {
+    final aData = a.data();
+    final bData = b.data();
+    final companyCompare = (aData['companyName'] ?? '')
+        .toString()
+        .toLowerCase()
+        .compareTo((bData['companyName'] ?? '').toString().toLowerCase());
+    if (companyCompare != 0) return companyCompare;
+    return (aData['planName'] ?? '').toString().toLowerCase().compareTo(
+      (bData['planName'] ?? '').toString().toLowerCase(),
     );
   }
 
@@ -1188,7 +1204,7 @@ class _LifePoliciesTabState extends State<LifePoliciesTab> {
                     children: [
                       const SizedBox(height: 10),
 
-                      _sectionLabel('Tag Insurance Company *'),
+                      _sectionLabel('Select Company *'),
                       DropdownButtonFormField<String>(
                         value: selectedCompanyId,
                         hint: const Text(
@@ -1213,7 +1229,34 @@ class _LifePoliciesTabState extends State<LifePoliciesTab> {
                             .map(
                               (c) => DropdownMenuItem<String>(
                                 value: c['id'].toString(),
-                                child: Text(c['companyName']?.toString() ?? ''),
+                                child: Row(
+                                  children: [
+                                    CompanyLogo(
+                                      companyName:
+                                          c['companyName']?.toString() ?? '',
+                                      customLogoUrl: c['logoUrl']?.toString(),
+                                      size: 22,
+                                      radius: 5,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        c['companyName']?.toString() ?? '',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
+                                    ),
+                                    if ((c['companyType']?.toString() ?? '')
+                                        .isNotEmpty)
+                                      Text(
+                                        '(${c['companyType']})',
+                                        style: const TextStyle(
+                                          color: _textMuted,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
                             )
                             .toList(),
@@ -1633,142 +1676,206 @@ class _LoadingDialog extends StatelessWidget {
   }
 }
 
-// ─── Life Policy Row ─────────────────────────────────────────────────────────
+// ─── Life Policy Grid Card ────────────────────────────────────────────────────
 
-class _LifePolicyRow extends StatelessWidget {
+class _LifePolicyGridCard extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> doc;
   final int serialNumber;
   final VoidCallback onTap;
 
-  static const _primary = Color(0xFF0D2D4F);
-  static const _accent = Color(0xFF7C3AED);
-  static const _surface = Color(0xFFFFFFFF);
-  static const _border = Color(0xFFE4E7EC);
-  static const _textMain = Color(0xFF0D1B2A);
-  static const _textMuted = Color(0xFF8A94A6);
-  static const _red = Color(0xFFDC2626);
-
-  const _LifePolicyRow({
+  const _LifePolicyGridCard({
     required this.doc,
     required this.serialNumber,
     required this.onTap,
   });
 
   @override
+  State<_LifePolicyGridCard> createState() => _LifePolicyGridCardState();
+}
+
+class _LifePolicyGridCardState extends State<_LifePolicyGridCard> {
+  bool _isHovered = false;
+
+  static const _accent = Color(0xFF7C3AED);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _border = Color(0xFFE4E7EC);
+  static const _textMain = Color(0xFF0D1B2A);
+  static const _textMuted = Color(0xFF8A94A6);
+  static const _red = Color(0xFFDC2626);
+  static const _bg = Color(0xFFF4F6F9);
+  static const _blueAccent = Color(0xFF1A6EBD);
+
+  @override
   Widget build(BuildContext context) {
-    final data = doc.data();
+    final data = widget.doc.data();
     final planName = data['planName'] ?? '';
     final policyCode = data['policyCode'] ?? '';
     final status = data['status'] ?? 'Active';
     final companyName = data['companyName'] ?? '';
     final isActive = status == 'Active';
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _border),
-        ),
-        child: Row(
-          children: [
-            ListSerialNumber(number: serialNumber),
-            const SizedBox(width: 10),
-            CompanyLogo(
-              companyName: companyName.toString(),
-              customLogoUrl: data['companyLogoUrl']?.toString(),
-              size: 36,
-              radius: 9,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _isHovered ? _blueAccent : _border,
+              width: _isHovered ? 1.5 : 1.0,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    planName,
+            boxShadow: [
+              if (_isHovered)
+                BoxShadow(
+                  color: _blueAccent.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                )
+              else
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                top: -8,
+                left: -8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Text(
+                    '#${widget.serialNumber}',
                     style: const TextStyle(
-                      color: _textMain,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                      color: _textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      if (companyName.toString().isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _primary.withValues(alpha: 0.07),
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: CompanyLogoLabel(
-                            companyName: companyName.toString(),
-                            customLogoUrl: data['companyLogoUrl']?.toString(),
-                            logoSize: 16,
-                            style: const TextStyle(
-                              color: _primary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
+                ),
+              ),
+              Positioned(
+                top: -8,
+                right: -8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? Colors.green.withValues(alpha: 0.08)
+                        : _red.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: isActive ? Colors.green.shade700 : _red,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(width: 4),
+                  CompanyLogo(
+                    companyName: companyName.toString(),
+                    customLogoUrl: data['companyLogoUrl']?.toString(),
+                    size: 64,
+                    radius: 12,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          companyName.toString().isNotEmpty
+                              ? companyName.toString()
+                              : '-',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textMain,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            height: 1.25,
                           ),
                         ),
-                      const SizedBox(width: 6),
-                      Text(
-                        policyCode,
-                        style: const TextStyle(color: _textMuted, fontSize: 11),
-                      ),
-                    ],
+                        const SizedBox(height: 3),
+                        Text(
+                          planName.toString(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _accent.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: const Text(
+                                'Life',
+                                style: TextStyle(
+                                  color: _accent,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            if (policyCode.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                policyCode,
+                                style: const TextStyle(
+                                  color: _textMuted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: _accent.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: const Text(
-                'Life',
-                style: TextStyle(
-                  color: _accent,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? Colors.green.withValues(alpha: 0.08)
-                    : _red.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                status,
-                style: TextStyle(
-                  color: isActive ? Colors.green.shade700 : _red,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 18,
-              color: Color(0xFF8A94A6),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

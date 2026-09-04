@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../utils/audit_log_service.dart';
+import '../../utils/lead_serial_fields.dart';
+import '../../widgets/auto_hide_controls.dart';
 
 class ClaimsTab extends StatefulWidget {
   final Map<String, dynamic>? currentUser;
@@ -32,6 +34,7 @@ class _ClaimsTabState extends State<ClaimsTab> {
     _SortOption('requestedAt', 'Requested', 'Oldest', 'Newest'),
     _SortOption('customerName', 'Customer', 'A→Z', 'Z→A'),
     _SortOption('customerMobile', 'Mobile', 'Low→High', 'High→Low'),
+    _SortOption('policyNumber', 'Policy No.', 'A→Z', 'Z→A'),
     _SortOption('claimAmount', 'Amount', 'Low→High', 'High→Low'),
     _SortOption('claimStatus', 'Status', 'A→Z', 'Z→A'),
   ];
@@ -41,7 +44,8 @@ class _ClaimsTabState extends State<ClaimsTab> {
     _ColDef('Customer', 150, Alignment.centerLeft),
     _ColDef('Mobile', 110, Alignment.centerLeft),
     _ColDef('Policy', 150, Alignment.centerLeft),
-    _ColDef('Policy Code', 110, Alignment.centerLeft),
+    _ColDef('Policy No.', 130, Alignment.centerLeft),
+    _ColDef('Unique ID', 110, Alignment.centerLeft),
     _ColDef('Claim Type', 110, Alignment.centerLeft),
     _ColDef('Amount', 100, Alignment.centerRight),
     _ColDef('Requested On', 110, Alignment.center),
@@ -108,7 +112,17 @@ class _ClaimsTabState extends State<ClaimsTab> {
 
   bool _hasActiveCustomer(Map<String, dynamic> data, Set<String> keys) {
     final customerId = (data['customerId'] ?? '').toString().trim();
-    return customerId.isNotEmpty && keys.contains('id:$customerId');
+    if (customerId.isEmpty) return false;
+    if (keys.isEmpty) return true;
+    return keys.contains('id:$customerId') ||
+        (data['customerName'] ?? data['name'] ?? '')
+            .toString()
+            .trim()
+            .isNotEmpty ||
+        (data['customerMobile'] ?? data['contact'] ?? '')
+            .toString()
+            .trim()
+            .isNotEmpty;
   }
 
   Set<String> _linkedPolicyKeys(
@@ -268,8 +282,12 @@ class _ClaimsTabState extends State<ClaimsTab> {
                 .toString(),
             'policyName': (policy['policyName'] ?? data['policyName'] ?? '')
                 .toString(),
+            'policyNumber':
+                (policy['policyNumber'] ?? data['policyNumber'] ?? '')
+                    .toString(),
             'policyCode': (policy['policyCode'] ?? data['policyCode'] ?? '')
                 .toString(),
+            ...leadUniqueIdCopyFields({...policy, ...data}),
             'claimType': (data['claimType'] ?? 'General').toString(),
             'claimAmount': (data['claimAmount'] is num)
                 ? (data['claimAmount'] as num).toDouble()
@@ -295,7 +313,9 @@ class _ClaimsTabState extends State<ClaimsTab> {
               (m['customerMobile'] ?? '').toString().toLowerCase().contains(
                 q,
               ) ||
+              leadUniqueIdFromData(m).toLowerCase().contains(q) ||
               (m['policyName'] ?? '').toString().toLowerCase().contains(q) ||
+              (m['policyNumber'] ?? '').toString().toLowerCase().contains(q) ||
               (m['policyCode'] ?? '').toString().toLowerCase().contains(q) ||
               (m['claimType'] ?? '').toString().toLowerCase().contains(q) ||
               (m['claimStatus'] ?? '').toString().toLowerCase().contains(q);
@@ -306,10 +326,16 @@ class _ClaimsTabState extends State<ClaimsTab> {
       int cmp = 0;
       if (_sortBy == 'customerName' ||
           _sortBy == 'customerMobile' ||
-          _sortBy == 'claimStatus') {
-        cmp = (a[_sortBy] ?? '').toString().compareTo(
-          (b[_sortBy] ?? '').toString(),
-        );
+          _sortBy == 'claimStatus' ||
+          _sortBy == 'policyNumber' ||
+          _sortBy == 'leadUniqueId') {
+        final av = _sortBy == 'leadUniqueId'
+            ? leadUniqueIdFromData(a)
+            : (a[_sortBy] ?? '').toString();
+        final bv = _sortBy == 'leadUniqueId'
+            ? leadUniqueIdFromData(b)
+            : (b[_sortBy] ?? '').toString();
+        cmp = av.compareTo(bv);
       } else if (_sortBy == 'claimAmount') {
         cmp = ((a['claimAmount'] ?? 0) as double).compareTo(
           (b['claimAmount'] ?? 0) as double,
@@ -348,158 +374,151 @@ class _ClaimsTabState extends State<ClaimsTab> {
   Widget build(BuildContext context) {
     return Container(
       color: _bg,
-      child: Column(
-        children: [
-          _buildToolbar(),
-          _buildStatsRow(),
-          const Divider(height: 1, color: _border),
-          _buildSortRow(),
-          const Divider(height: 1, color: _border),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _customersStream(),
-              builder: (context, customersSnap) {
-                if (customersSnap.connectionState == ConnectionState.waiting) {
+      child: AutoHideControlsRegion(
+        controls: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildToolbar(),
+            _buildStatsRow(),
+            const Divider(height: 1, color: _border),
+            _buildSortRow(),
+          ],
+        ),
+        divider: const Divider(height: 1, color: _border),
+        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _customersStream(),
+          builder: (context, customersSnap) {
+            if (customersSnap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: _primary),
+              );
+            }
+            if (customersSnap.hasError) {
+              return Center(
+                child: Text(
+                  'Error: ${customersSnap.error}',
+                  style: const TextStyle(color: _rejected),
+                ),
+              );
+            }
+
+            final activeCustomers = _activeCustomerKeys(
+              customersSnap.data?.docs ?? [],
+            );
+
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _policiesStream(),
+              builder: (context, policiesSnap) {
+                if (policiesSnap.connectionState == ConnectionState.waiting) {
                   return const Center(
                     child: CircularProgressIndicator(color: _primary),
                   );
                 }
-                if (customersSnap.hasError) {
+                if (policiesSnap.hasError) {
                   return Center(
                     child: Text(
-                      'Error: ${customersSnap.error}',
+                      'Error: ${policiesSnap.error}',
                       style: const TextStyle(color: _rejected),
                     ),
                   );
                 }
 
-                final activeCustomers = _activeCustomerKeys(
-                  customersSnap.data?.docs ?? [],
+                final linkedPolicies = _linkedPolicyKeys(
+                  policiesSnap.data?.docs ?? [],
+                  activeCustomers,
                 );
 
                 return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _policiesStream(),
-                  builder: (context, policiesSnap) {
-                    if (policiesSnap.connectionState ==
-                        ConnectionState.waiting) {
+                  stream: _claimsStream(),
+                  builder: (context, claimsSnap) {
+                    if (claimsSnap.connectionState == ConnectionState.waiting) {
                       return const Center(
                         child: CircularProgressIndicator(color: _primary),
                       );
                     }
-                    if (policiesSnap.hasError) {
+                    if (claimsSnap.hasError) {
                       return Center(
                         child: Text(
-                          'Error: ${policiesSnap.error}',
+                          'Error: ${claimsSnap.error}',
                           style: const TextStyle(color: _rejected),
                         ),
                       );
                     }
 
-                    final linkedPolicies = _linkedPolicyKeys(
-                      policiesSnap.data?.docs ?? [],
-                      activeCustomers,
-                    );
+                    final visibleDocs =
+                        <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    final policiesByClaim = <String, Map<String, dynamic>>{};
+                    for (final claim in claimsSnap.data?.docs ?? []) {
+                      if (!_hasActiveCustomer(claim.data(), activeCustomers) ||
+                          !_hasLinkedPolicy(claim.data(), linkedPolicies) ||
+                          !_belongsToCurrentUser(claim.data())) {
+                        continue;
+                      }
+                      final policy = _linkedPolicyForClaim(
+                        claim.data(),
+                        policiesSnap.data?.docs ?? [],
+                        activeCustomers,
+                      );
+                      if (policy == null) continue;
+                      visibleDocs.add(claim);
+                      policiesByClaim[claim.id] = policy;
+                    }
+                    final claims = _process(visibleDocs, policiesByClaim);
+                    if (claims.isEmpty) return _emptyState();
 
-                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: _claimsStream(),
-                      builder: (context, claimsSnap) {
-                        if (claimsSnap.connectionState ==
-                            ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(color: _primary),
-                          );
-                        }
-                        if (claimsSnap.hasError) {
-                          return Center(
-                            child: Text(
-                              'Error: ${claimsSnap.error}',
-                              style: const TextStyle(color: _rejected),
-                            ),
-                          );
-                        }
-
-                        final visibleDocs =
-                            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-                        final policiesByClaim =
-                            <String, Map<String, dynamic>>{};
-                        for (final claim in claimsSnap.data?.docs ?? []) {
-                          if (!_hasActiveCustomer(
-                                claim.data(),
-                                activeCustomers,
-                              ) ||
-                              !_hasLinkedPolicy(claim.data(), linkedPolicies) ||
-                              !_belongsToCurrentUser(claim.data())) {
-                            continue;
-                          }
-                          final policy = _linkedPolicyForClaim(
-                            claim.data(),
-                            policiesSnap.data?.docs ?? [],
-                            activeCustomers,
-                          );
-                          if (policy == null) continue;
-                          visibleDocs.add(claim);
-                          policiesByClaim[claim.id] = policy;
-                        }
-                        final claims = _process(visibleDocs, policiesByClaim);
-                        if (claims.isEmpty) return _emptyState();
-
-                        return Column(
-                          children: [
-                            Container(
-                              color: _surface,
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                              child: Row(
+                    return Column(
+                      children: [
+                        Container(
+                          color: _surface,
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                          child: Row(
+                            children: [
+                              Text(
+                                '${claims.length} claim${claims.length == 1 ? '' : 's'}',
+                                style: const TextStyle(
+                                  color: _textMuted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const Spacer(),
+                              const Text(
+                                'Requested, review, approved and rejected claims are shown here',
+                                style: TextStyle(
+                                  color: _textMuted,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1, color: _border),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.vertical,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '${claims.length} claim${claims.length == 1 ? '' : 's'}',
-                                    style: const TextStyle(
-                                      color: _textMuted,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  const Text(
-                                    'Requested, review, approved and rejected claims are shown here',
-                                    style: TextStyle(
-                                      color: _textMuted,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                                  _tableHeader(),
+                                  ...claims.asMap().entries.map(
+                                    (e) => _tableRow(context, e.key, e.value),
                                   ),
                                 ],
                               ),
                             ),
-                            const Divider(height: 1, color: _border),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.vertical,
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _tableHeader(),
-                                      ...claims.asMap().entries.map(
-                                        (e) =>
-                                            _tableRow(context, e.key, e.value),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                          ),
+                        ),
+                      ],
                     );
                   },
                 );
               },
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -847,8 +866,10 @@ class _ClaimsTabState extends State<ClaimsTab> {
         return 'customerMobile';
       case 'Policy':
         return 'policyName';
-      case 'Policy Code':
-        return 'policyCode';
+      case 'Policy No.':
+        return 'policyNumber';
+      case 'Unique ID':
+        return 'leadUniqueId';
       case 'Claim Type':
         return 'claimType';
       case 'Amount':
@@ -874,6 +895,7 @@ class _ClaimsTabState extends State<ClaimsTab> {
     final typeColor = _primary;
     final amount = (claim['claimAmount'] ?? 0).toString();
     final progress = _progressForClaim(claim);
+    final uniqueId = leadUniqueIdFromData(claim);
 
     return InkWell(
       onTap: () => _showClaimDetails(context, claim),
@@ -921,7 +943,20 @@ class _ClaimsTabState extends State<ClaimsTab> {
               clip: true,
             ),
             _cell(
-              claim['policyCode'] ?? '-',
+              (claim['policyNumber'] ?? '').toString().isEmpty
+                  ? '-'
+                  : claim['policyNumber'].toString(),
+              130,
+              Alignment.centerLeft,
+              style: const TextStyle(
+                color: _textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              clip: true,
+            ),
+            _cell(
+              uniqueId.isEmpty ? '-' : uniqueId,
               110,
               Alignment.centerLeft,
               style: const TextStyle(color: _textMuted, fontSize: 11),
@@ -1107,7 +1142,9 @@ class _ClaimsTabState extends State<ClaimsTab> {
     String selectedCustomerName = '';
     String selectedCustomerMobile = '';
     String selectedPolicyName = '';
+    String selectedPolicyNumber = '';
     String selectedPolicyCode = '';
+    String selectedLeadUniqueId = '';
     DateTime requestedAt = DateTime.now();
 
     showDialog(
@@ -1130,7 +1167,13 @@ class _ClaimsTabState extends State<ClaimsTab> {
                 'customerName': selectedCustomerName,
                 'customerMobile': selectedCustomerMobile,
                 'policyName': selectedPolicyName,
+                'policyNumber': selectedPolicyNumber,
                 'policyCode': selectedPolicyCode,
+                if (selectedLeadUniqueId.isNotEmpty) ...{
+                  'leadUniqueId': selectedLeadUniqueId,
+                  'uniqueLeadId': selectedLeadUniqueId,
+                  'leadSerialNumber': selectedLeadUniqueId,
+                },
                 'claimType': claimTypeCtrl.text.trim(),
                 'claimAmount':
                     double.tryParse(claimAmountCtrl.text.trim()) ?? 0,
@@ -1246,9 +1289,14 @@ class _ClaimsTabState extends State<ClaimsTab> {
                                             '')
                                         .toString()
                                         .toLowerCase();
+                                final policyNumber =
+                                    (data['policyNumber'] ?? '')
+                                        .toString()
+                                        .toLowerCase();
                                 return q.isEmpty ||
                                     name.contains(q) ||
-                                    mobile.contains(q);
+                                    mobile.contains(q) ||
+                                    policyNumber.contains(q);
                               }).toList();
 
                               return Column(
@@ -1279,8 +1327,13 @@ class _ClaimsTabState extends State<ClaimsTab> {
                                             .toString();
                                     final policyName =
                                         (data['policyName'] ?? '').toString();
+                                    final policyNumber =
+                                        (data['policyNumber'] ?? '').toString();
                                     final policyCode =
                                         (data['policyCode'] ?? '').toString();
+                                    final leadUniqueId = leadUniqueIdFromData(
+                                      data,
+                                    );
                                     final isSelected = selectedPolicyId == d.id;
 
                                     return Container(
@@ -1304,7 +1357,9 @@ class _ClaimsTabState extends State<ClaimsTab> {
                                             selectedCustomerName = name;
                                             selectedCustomerMobile = mobile;
                                             selectedPolicyName = policyName;
+                                            selectedPolicyNumber = policyNumber;
                                             selectedPolicyCode = policyCode;
+                                            selectedLeadUniqueId = leadUniqueId;
                                           });
                                         },
                                         leading: CircleAvatar(
@@ -1323,7 +1378,7 @@ class _ClaimsTabState extends State<ClaimsTab> {
                                           ),
                                         ),
                                         subtitle: Text(
-                                          '$mobile • $policyName • $policyCode',
+                                          '$mobile • ${policyNumber.isEmpty ? '-' : policyNumber} • $policyName • ${leadUniqueId.isEmpty ? '-' : leadUniqueId}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -1546,8 +1601,16 @@ class _ClaimsTabState extends State<ClaimsTab> {
                       claim['policyName']?.toString() ?? '-',
                     ),
                     _detailRow(
-                      'Policy Code',
-                      claim['policyCode']?.toString() ?? '-',
+                      'Policy No.',
+                      (claim['policyNumber'] ?? '').toString().isEmpty
+                          ? '-'
+                          : claim['policyNumber'].toString(),
+                    ),
+                    _detailRow(
+                      'Unique ID',
+                      leadUniqueIdFromData(claim).isEmpty
+                          ? '-'
+                          : leadUniqueIdFromData(claim),
                     ),
                     _detailRow(
                       'Claim Type',

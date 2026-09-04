@@ -123,14 +123,24 @@ class LeadStatusGuard {
         .collection('customers')
         .doc(customerId)
         .get();
-    final leadId = (customer.data()?['telecallerLeadId'] ?? '').toString();
-    if (leadId.isNotEmpty) {
+    final customerData = customer.data() ?? const <String, dynamic>{};
+    final leadIds = <String>{
+      for (final key in [
+        'telecallerLeadId',
+        'executiveLeadId',
+        'leadId',
+        'linkedLeadId',
+      ])
+        if ((customerData[key] ?? '').toString().trim().isNotEmpty)
+          (customerData[key] ?? '').toString().trim(),
+    };
+
+    for (final leadId in leadIds) {
       final lead = await firestore
           .collection('telecaller_leads')
           .doc(leadId)
           .get();
-      if (lead.exists &&
-          (lead.data()?['assignedExecutiveId'] ?? '').toString().isNotEmpty) {
+      if (lead.exists && _hasExecutiveLink(lead.data())) {
         final query = await firestore
             .collection('telecaller_leads')
             .where(FieldPath.documentId, isEqualTo: lead.id)
@@ -140,17 +150,63 @@ class LeadStatusGuard {
       }
     }
 
-    final byCustomerId = await firestore
-        .collection('telecaller_leads')
-        .where('executiveCustomerIds', arrayContains: customerId)
-        .limit(1)
-        .get();
-    if (byCustomerId.docs.isEmpty) return null;
-    final leadData = byCustomerId.docs.first.data();
-    if ((leadData['assignedExecutiveId'] ?? '').toString().isEmpty) {
-      return null;
+    for (final field in [
+      'executiveCustomerIds',
+      'customerIds',
+      'linkedCustomerIds',
+    ]) {
+      final byCustomerId = await firestore
+          .collection('telecaller_leads')
+          .where(field, arrayContains: customerId)
+          .limit(1)
+          .get();
+      final lead = _firstExecutiveLead(byCustomerId.docs);
+      if (lead != null) return lead;
     }
-    return byCustomerId.docs.first;
+
+    for (final key in ['leadUniqueId', 'uniqueLeadId', 'leadSerialNumber']) {
+      final value = (customerData[key] ?? '').toString().trim();
+      if (value.isEmpty) continue;
+      final byUniqueId = await firestore
+          .collection('telecaller_leads')
+          .where(key, isEqualTo: value)
+          .limit(1)
+          .get();
+      final lead = _firstExecutiveLead(byUniqueId.docs);
+      if (lead != null) return lead;
+    }
+
+    final mobile = (customerData['mobileNumber'] ?? '').toString().trim();
+    if (mobile.isNotEmpty) {
+      final byMobile = await firestore
+          .collection('telecaller_leads')
+          .where('mobileNumber', isEqualTo: mobile)
+          .limit(5)
+          .get();
+      final lead = _firstExecutiveLead(byMobile.docs);
+      if (lead != null) return lead;
+    }
+
+    return null;
+  }
+
+  static QueryDocumentSnapshot<Map<String, dynamic>>? _firstExecutiveLead(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    for (final doc in docs) {
+      if (_hasExecutiveLink(doc.data())) return doc;
+    }
+    return null;
+  }
+
+  static bool _hasExecutiveLink(Map<String, dynamic>? data) {
+    if (data == null) return false;
+    return (data['assignedExecutiveId'] ?? '').toString().trim().isNotEmpty ||
+        (data['assignedExecutiveUid'] ?? '').toString().trim().isNotEmpty ||
+        (data['assignedExecutiveName'] ?? '').toString().trim().isNotEmpty ||
+        (data['executiveAssignedToId'] ?? '').toString().trim().isNotEmpty ||
+        (data['executiveAssignedToUid'] ?? '').toString().trim().isNotEmpty ||
+        (data['executiveAssignedToName'] ?? '').toString().trim().isNotEmpty;
   }
 
   static Future<double?> _askCustomerValue(BuildContext context) {

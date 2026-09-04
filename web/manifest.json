@@ -1,11 +1,11 @@
 {
-    "name": "policy",
-    "short_name": "policy",
+    "name": "Makk Finsol",
+    "short_name": "Makk Finsol",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Makk Finsol insurance management",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

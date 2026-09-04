@@ -479,7 +479,10 @@ class ReportsTab extends StatelessWidget {
                     return Center(child: Text('Error: ${snap.error}'));
                   }
 
-                  final docs = snap.data?.docs ?? [];
+                  final docs = (snap.data?.docs ?? []).where((doc) {
+                    final type = (doc.data()['type'] ?? '').toString();
+                    return type.toLowerCase() != 'revenue invoice';
+                  }).toList();
                   if (docs.isEmpty) {
                     return const Center(
                       child: Text(

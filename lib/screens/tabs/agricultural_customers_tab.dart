@@ -6,10 +6,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/auto_hide_controls.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/audit_log_service.dart';
+import '../../utils/lead_serial_fields.dart';
 import '../../utils/lead_status_guard.dart';
 import '../../utils/lead_workflow_rules.dart';
 import '../../utils/pdf_picker.dart';
@@ -93,30 +95,32 @@ Future<void> _openPdfUrl(BuildContext context, String url) async {
 // The selected policy PDF is read locally and mapped into form fields.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class AgriculturalCustomersTab extends StatefulWidget {
+class AgricultureCustomersTab extends StatefulWidget {
   final String category;
   final String title;
   final Map<String, dynamic>? currentUser;
   final String? initialCustomerId;
   final String initialView;
   final bool lockView;
+  final VoidCallback? onBackToPolicyHolders;
 
-  const AgriculturalCustomersTab({
+  const AgricultureCustomersTab({
     super.key,
-    this.category = 'Agricultural',
-    this.title = 'Agricultural Customers',
+    this.category = 'Agriculture',
+    this.title = 'Agriculture Customers',
     this.currentUser,
     this.initialCustomerId,
     this.initialView = 'Leads',
     this.lockView = false,
+    this.onBackToPolicyHolders,
   });
 
   @override
-  State<AgriculturalCustomersTab> createState() =>
-      _AgriculturalCustomersTabState();
+  State<AgricultureCustomersTab> createState() =>
+      _AgricultureCustomersTabState();
 }
 
-class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
+class _AgricultureCustomersTabState extends State<AgricultureCustomersTab> {
   // ── palette ────────────────────────────────────────────────────────────────
   static const _primary = Color(0xFF0D2D4F);
   static const _accent = Color(0xFF1A6EBD);
@@ -127,6 +131,11 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
   static const _textMuted = Color(0xFF8A94A6);
   static const _red = Color(0xFFDC2626);
   static const _green = Color(0xFF16A34A);
+
+  static String _categoryKey(String value) {
+    final key = value.trim().toLowerCase();
+    return key == 'agricultural' ? 'agriculture' : key;
+  }
 
   // ── state ──────────────────────────────────────────────────────────────────
   final _searchCtrl = TextEditingController();
@@ -172,6 +181,10 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
       (widget.currentUser?['role'] ?? '').toString().toLowerCase() ==
       'executive';
 
+  bool get _isTeamLeader =>
+      (widget.currentUser?['role'] ?? '').toString().toLowerCase() ==
+      'team_leader';
+
   String get _currentEmployeeId =>
       (widget.currentUser?['_profileDocId'] ?? widget.currentUser?['uid'] ?? '')
           .toString();
@@ -193,6 +206,22 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
         .toString()
         .trim()
         .toLowerCase();
+    if (_isTeamLeader) {
+      final teamLeaderIds = [
+        data['assignedByTeamLeaderId'],
+        data['teamLeaderId'],
+        data['teamLeaderAssignedToId'],
+        data['executiveAssignedByTeamLeaderId'],
+      ].map((value) => (value ?? '').toString().trim());
+      final teamLeaderNames = [
+        data['assignedByTeamLeaderName'],
+        data['teamLeaderName'],
+        data['teamLeaderAssignedToName'],
+        data['executiveAssignedByTeamLeaderName'],
+      ].map((value) => (value ?? '').toString().trim().toLowerCase());
+      return (id.isNotEmpty && teamLeaderIds.contains(id)) ||
+          (name.isNotEmpty && teamLeaderNames.contains(name));
+    }
     return (id.isNotEmpty && (employeeId == id || createdBy == id)) ||
         (name.isNotEmpty && employeeName == name);
   }
@@ -242,7 +271,9 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
         doc: _selectedCustomer!,
         category: widget.category,
         currentUser: widget.currentUser,
-        onBack: () => setState(() => _selectedCustomer = null),
+        onBack:
+            widget.onBackToPolicyHolders ??
+            () => setState(() => _selectedCustomer = null),
         onEdit: () => _showCustomerDialog(
           context,
           docId: _selectedCustomer!.id,
@@ -260,130 +291,137 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            const Divider(height: 1, color: _border),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
+        child: AutoHideControlsRegion(
+          controls: _buildHeader(context),
+          divider: const Divider(height: 1, color: _border),
+          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _stream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _accent),
+                );
+              }
+              if (snap.hasError) {
+                return Center(child: Text('Error: ${snap.error}'));
+              }
+              var docs = snap.data?.docs ?? [];
+              if (_search.isNotEmpty) {
+                docs = docs.where((d) {
+                  final data = d.data();
+                  return (data['fullName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['leadUniqueId'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['uniqueLeadId'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['leadSerialNumber'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['mobileNumber'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search);
+                }).toList();
+              }
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _policyLinksStream,
+                builder: (context, policySnap) {
+                  if (policySnap.hasError) {
+                    return Center(child: Text('Error: ${policySnap.error}'));
+                  }
+                  if (!policySnap.hasData) {
                     return const Center(
                       child: CircularProgressIndicator(color: _accent),
                     );
                   }
-                  if (snap.hasError) {
-                    return Center(child: Text('Error: ${snap.error}'));
-                  }
-                  var docs = snap.data?.docs ?? [];
-                  if (_search.isNotEmpty) {
-                    docs = docs.where((d) {
-                      final data = d.data();
-                      return (data['fullName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['mobileNumber'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search);
-                    }).toList();
-                  }
-                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _policyLinksStream,
-                    builder: (context, policySnap) {
-                      if (policySnap.hasError) {
-                        return Center(
-                          child: Text('Error: ${policySnap.error}'),
-                        );
-                      }
-                      if (!policySnap.hasData) {
-                        return const Center(
-                          child: CircularProgressIndicator(color: _accent),
-                        );
-                      }
-                      final policies = policySnap.data?.docs ?? [];
-                      final visibleDocs = docs.where((customer) {
-                        if (!_belongsToCurrentEmployee(customer.data())) {
-                          return false;
-                        }
-                        final linkedPolicies =
-                            _allowsLinkedPolicyDisplay(customer.data())
-                            ? _policiesForCustomer(
-                                policies,
-                                customer.id,
-                                widget.category,
-                              )
-                            : <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-                        if (!_customerBelongsToCategory(
-                          customer.data(),
-                          linkedPolicies,
-                          widget.category,
-                        )) {
-                          return false;
-                        }
-                        final isPolicyHolder = linkedPolicies.isNotEmpty;
-                        if (_customerView == 'Policy Holders') {
-                          return isPolicyHolder;
-                        }
-                        if (isPolicyHolder) return false;
-                        if (_leadFilter == 'All') return true;
-                        return _leadStatus(customer.data()) == _leadFilter;
-                      }).toList();
-                      _openInitialCustomerIfNeeded(visibleDocs);
-                      if (visibleDocs.isEmpty) return _buildEmpty(context);
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: 1050,
-                          child: Column(
-                            children: [
-                              const _CustomerListHeader(),
-                              Expanded(
-                                child: ListView.separated(
-                                  itemCount: visibleDocs.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 0),
-                                  itemBuilder: (_, i) {
-                                    final customer = visibleDocs[i];
-                                    final linkedPolicies =
-                                        _allowsLinkedPolicyDisplay(
-                                          customer.data(),
-                                        )
-                                        ? _policiesForCustomer(
-                                            policies,
-                                            customer.id,
-                                            widget.category,
-                                          )
-                                        : <
-                                            QueryDocumentSnapshot<
-                                              Map<String, dynamic>
-                                            >
-                                          >[];
-                                    return _CustomerRow(
-                                      doc: customer,
-                                      linkedPolicy: linkedPolicies.isEmpty
-                                          ? null
-                                          : linkedPolicies.first.data(),
-                                      onTap: () => setState(
-                                        () => _selectedCustomer = customer,
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
+                  final policies = policySnap.data?.docs ?? [];
+                  final visibleDocs = docs.where((customer) {
+                    if (!_belongsToCurrentEmployee(customer.data())) {
+                      return false;
+                    }
+                    final linkedPolicies =
+                        _allowsLinkedPolicyDisplay(customer.data())
+                        ? _policiesForCustomer(
+                            policies,
+                            customer.id,
+                            widget.category,
+                          )
+                        : <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    if (!_customerBelongsToCategory(
+                      customer.data(),
+                      linkedPolicies,
+                      widget.category,
+                    )) {
+                      return false;
+                    }
+                    final isPolicyHolder = linkedPolicies.isNotEmpty;
+                    if (_customerView == 'Policy Holders') {
+                      return isPolicyHolder;
+                    }
+                    if (customer.data()['policyLinkedManually'] != false) {
+                      return false;
+                    }
+                    if (isPolicyHolder) return false;
+                    if (_leadFilter == 'All') return true;
+                    return _leadStatus(customer.data()) == _leadFilter;
+                  }).toList();
+                  _openInitialCustomerIfNeeded(visibleDocs);
+                  if (visibleDocs.isEmpty) return _buildEmpty(context);
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 1050,
+                      child: Column(
+                        children: [
+                          const _CustomerListHeader(),
+                          Expanded(
+                            child: ListView.separated(
+                              itemCount: visibleDocs.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 0),
+                              itemBuilder: (_, i) {
+                                final customer = visibleDocs[i];
+                                final linkedPolicies =
+                                    _allowsLinkedPolicyDisplay(customer.data())
+                                    ? _policiesForCustomer(
+                                        policies,
+                                        customer.id,
+                                        widget.category,
+                                      )
+                                    : <
+                                        QueryDocumentSnapshot<
+                                          Map<String, dynamic>
+                                        >
+                                      >[];
+                                return _CustomerRow(
+                                  doc: customer,
+                                  linkedPolicy: linkedPolicies.isEmpty
+                                      ? null
+                                      : linkedPolicies.first.data(),
+                                  onTap: () => setState(
+                                    () => _selectedCustomer = customer,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        ],
+                      ),
+                    ),
                   );
                 },
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -769,7 +807,7 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                   'employeeName': employeeName,
                   'employeeId': employeeId,
                   'searchKey':
-                      '${nameValue.toLowerCase()} $mobileValue $emailValue $panValue $aadhaarValue',
+                      '${nameValue.toLowerCase()} $mobileValue $emailValue $panValue $aadhaarValue ${leadUniqueIdFromData(existing ?? const {})}',
                   'updatedAt': FieldValue.serverTimestamp(),
                   'updatedBy': uid,
                 };
@@ -789,18 +827,28 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                     extra: {'customerName': nameValue},
                   );
                 } else {
+                  final customerRef = FirebaseFirestore.instance
+                      .collection('customers')
+                      .doc();
+                  final leadFields = await reserveCustomerLeadUniqueIdFields(
+                    category: widget.category,
+                    customerId: customerRef.id,
+                    customerName: nameValue,
+                  );
+                  data.addAll(leadFields);
+                  data['searchKey'] =
+                      '${data['searchKey']} ${leadFields['leadUniqueId'] ?? ''}'
+                          .trim();
                   data['createdAt'] = FieldValue.serverTimestamp();
                   data['createdBy'] = uid;
                   data['customerCategory'] = widget.category;
                   data['policyLinkedManually'] = false;
-                  final created = await FirebaseFirestore.instance
-                      .collection('customers')
-                      .add(data);
+                  await customerRef.set(data);
                   await AuditLogService.write(
                     page: '${widget.category} Customers',
                     action: 'Added Customer',
                     description: 'Added customer "$nameValue".',
-                    targetId: created.id,
+                    targetId: customerRef.id,
                     targetType: 'Customer',
                     targetName: nameValue,
                     extra: {'customerName': nameValue},
@@ -1476,8 +1524,8 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
     final allPolicies = uniquePolicies.values.toList()
       ..removeWhere(
         (policy) =>
-            (policy['category'] ?? widget.category).toString().toLowerCase() !=
-            widget.category.toLowerCase(),
+            _categoryKey((policy['category'] ?? widget.category).toString()) !=
+            _categoryKey(widget.category),
       )
       ..sort(
         (a, b) => (a['planName'] ?? '').toString().toLowerCase().compareTo(
@@ -1534,8 +1582,10 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
     DateTime? policyStartDate;
     DateTime? policyEndDate;
     double commissionPercent = 0;
-    int? selectedAgriculturalSlabIndex;
-    Map<String, dynamic>? selectedAgriculturalSlab;
+    final commissionPercentCtrl = TextEditingController();
+    bool manualCommissionOverride = false;
+    int? selectedAgricultureSlabIndex;
+    Map<String, dynamic>? selectedAgricultureSlab;
 
     // PDF state
     String? _uploadedFileName;
@@ -1567,6 +1617,20 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
 
     double parseNum(String v) =>
         double.tryParse(v.replaceAll(',', '').trim()) ?? 0;
+
+    String percentInput(double value) {
+      final fixed = value.toStringAsFixed(2);
+      return fixed.replaceFirst(RegExp(r'\.00$'), '');
+    }
+
+    void setCommissionPercentValue(double value, {bool manual = false}) {
+      commissionPercent = value.clamp(0, 100).toDouble();
+      manualCommissionOverride = manual;
+      final text = percentInput(commissionPercent);
+      if (!manual && commissionPercentCtrl.text != text) {
+        commissionPercentCtrl.text = text;
+      }
+    }
 
     String fmtDate(DateTime? d) {
       if (d == null) return '';
@@ -1660,12 +1724,13 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
             // ── commission recompute ────────────────────────────────────────
             void recomputeCommission() {
               if (selectedPolicy == null) return;
+              if (manualCommissionOverride) return;
               final category =
                   selectedPolicy!['category']?.toString().toLowerCase() ?? '';
               if (category == 'general') {
                 setS(
                   () => commissionPercent = generalSlabPercent(
-                    selectedAgriculturalSlab,
+                    selectedAgricultureSlab,
                   ),
                 );
                 return;
@@ -1718,7 +1783,7 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                             double.tryParse(s['percent']?.toString() ?? '0') ??
                             0;
                         if (compareValue >= from && compareValue <= to) {
-                          setS(() => commissionPercent = pct);
+                          setS(() => setCommissionPercentValue(pct));
                           return;
                         }
                       }
@@ -1727,8 +1792,8 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                 }
               }
               setS(
-                () => commissionPercent = getPolicyRenewalCommissionPercent(
-                  selectedPolicy!,
+                () => setCommissionPercentValue(
+                  getPolicyRenewalCommissionPercent(selectedPolicy!),
                 ),
               );
             }
@@ -1906,7 +1971,7 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                 );
                 return;
               }
-              if (selectedAgriculturalSlab == null) {
+              if (selectedAgricultureSlab == null) {
                 messenger.showSnackBar(
                   const SnackBar(
                     content: Text('Please select a payout slab'),
@@ -2020,6 +2085,17 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                     : productNameCtrl.text.trim();
 
                 final premiumAmount = parseNum(premiumCtrl.text);
+                if (commissionPercent < 0 || commissionPercent > 100) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Commission percentage must be between 0 and 100.',
+                      ),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
                 final insuredSum = parseNum(sumInsuredCtrl.text);
                 final commissionEarned =
                     (premiumAmount * commissionPercent) / 100;
@@ -2056,6 +2132,7 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
 
                 final policyFields = {
                   ...policySerial.toFirestoreFields(),
+                  ...leadUniqueIdCopyFields(customerData),
                   'customerId': customerId,
                   'customerName': customerName,
                   'customerMobile': customerMobile,
@@ -2078,20 +2155,23 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                   'premiumAmount': premiumAmount,
                   'sumInsured': insuredSum,
                   'commissionPercent': commissionPercent,
+                  'commissionOverridden': manualCommissionOverride,
                   'renewalCommissionPercent': getPolicyRenewalCommissionPercent(
                     selectedPolicy!,
                   ),
                   'commissionAmount': commissionEarned,
-                  'selectedSlabIndex': selectedAgriculturalSlabIndex,
+                  if (manualCommissionOverride)
+                    'commissionRule': 'Manual commission override',
+                  'selectedSlabIndex': selectedAgricultureSlabIndex,
                   'selectedSlabLabel': generalSlabLabel(
-                    selectedAgriculturalSlab,
+                    selectedAgricultureSlab,
                   ),
                   'selectedSlabPercent': generalSlabPercent(
-                    selectedAgriculturalSlab,
+                    selectedAgricultureSlab,
                   ),
                   'selectedSlabNotes':
-                      selectedAgriculturalSlab?['notes']?.toString() ?? '',
-                  'selectedAgriculturalSlab': selectedAgriculturalSlab,
+                      selectedAgricultureSlab?['notes']?.toString() ?? '',
+                  'selectedAgriculturalSlab': selectedAgricultureSlab,
                   'notes': notesCtrl.text.trim(),
                   if (pdfUrl != null) 'pdfUrl': pdfUrl,
                   if (pdfPath != null) 'pdfStoragePath': pdfPath,
@@ -2441,15 +2521,15 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                             setS(() {
                               selectedPolicyId = v;
                               selectedPolicy = p.isEmpty ? null : p;
-                              selectedAgriculturalSlabIndex = null;
-                              selectedAgriculturalSlab = null;
+                              selectedAgricultureSlabIndex = null;
+                              selectedAgricultureSlab = null;
                               issueDate = DateTime.now();
                               policyStartDate = DateTime.now();
                               policyEndDate = calcPolicyEndDate(
                                 DateTime.now(),
                                 12,
                               );
-                              commissionPercent = 0;
+                              setCommissionPercentValue(0);
                               if (premiumCtrl.text.isEmpty) premiumCtrl.clear();
                               if (sumInsuredCtrl.text.isEmpty)
                                 sumInsuredCtrl.clear();
@@ -2534,7 +2614,7 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                                       .toString();
                                   final percent = generalSlabPercent(slab);
                                   final selected =
-                                      selectedAgriculturalSlabIndex == index;
+                                      selectedAgricultureSlabIndex == index;
                                   final percentText =
                                       percent == percent.truncateToDouble()
                                       ? percent.toStringAsFixed(0)
@@ -2542,8 +2622,8 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                                   return InkWell(
                                     onTap: () {
                                       setS(() {
-                                        selectedAgriculturalSlabIndex = index;
-                                        selectedAgriculturalSlab = slab;
+                                        selectedAgricultureSlabIndex = index;
+                                        selectedAgricultureSlab = slab;
                                         commissionPercent = percent;
                                       });
                                     },
@@ -2565,14 +2645,14 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                                           Radio<int>(
                                             value: index,
                                             groupValue:
-                                                selectedAgriculturalSlabIndex,
+                                                selectedAgricultureSlabIndex,
                                             activeColor: _accent,
                                             onChanged: (v) {
                                               if (v == null) return;
                                               setS(() {
-                                                selectedAgriculturalSlabIndex =
+                                                selectedAgricultureSlabIndex =
                                                     v;
-                                                selectedAgriculturalSlab = slab;
+                                                selectedAgricultureSlab = slab;
                                                 commissionPercent = percent;
                                               });
                                             },
@@ -2797,12 +2877,21 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                'Commission %: $commissionPercent%',
-                                style: const TextStyle(
-                                  color: _textMuted,
-                                  fontSize: 12,
+                              _tf(
+                                'Commission %',
+                                commissionPercentCtrl,
+                                type: const TextInputType.numberWithOptions(
+                                  decimal: true,
                                 ),
+                                onChanged: (value) {
+                                  final pct = parseNum(value);
+                                  setS(
+                                    () => setCommissionPercentValue(
+                                      pct,
+                                      manual: true,
+                                    ),
+                                  );
+                                },
                               ),
                               const SizedBox(height: 2),
                               Text(
@@ -3001,12 +3090,14 @@ class _AgriculturalCustomersTabState extends State<AgriculturalCustomersTab> {
     TextInputType type = TextInputType.text,
     int maxLines = 1,
     bool readOnly = false,
+    ValueChanged<String>? onChanged,
   }) {
     return TextField(
       controller: ctrl,
       keyboardType: type,
       maxLines: maxLines,
       readOnly: readOnly,
+      onChanged: onChanged,
       style: const TextStyle(fontSize: 13, color: _textMain),
       decoration: _tfDec(label),
     );
@@ -3125,8 +3216,8 @@ class _CustomerListHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
         color: _surface,
         border: Border(
@@ -3137,6 +3228,7 @@ class _CustomerListHeader extends StatelessWidget {
       child: const Row(
         children: [
           _HeaderCell('Customer', 170),
+          _HeaderCell('Unique ID', 118),
           _HeaderCell('Mobile', 110),
           _HeaderCell('Employee', 110),
           _HeaderCell('Policy No.', 120),
@@ -3173,7 +3265,7 @@ class _HeaderText extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(
         color: _CustomerListHeader._primary,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: FontWeight.w900,
       ),
     );
@@ -3201,6 +3293,7 @@ class _CustomerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = doc.data();
     final name = data['fullName']?.toString() ?? '';
+    final uniqueId = leadUniqueIdFromData(data);
     final mobile = data['mobileNumber']?.toString() ?? '';
     final employee = (data['employeeName'] ?? data['employee'] ?? '')
         .toString();
@@ -3220,8 +3313,8 @@ class _CustomerRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        height: 66,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: const BoxDecoration(
           color: _surface,
           border: Border(bottom: BorderSide(color: _border, width: 0.7)),
@@ -3238,6 +3331,19 @@ class _CustomerRow extends StatelessWidget {
                   color: _textMain,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 118,
+              child: Text(
+                uniqueId.isEmpty ? '-' : uniqueId,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -3398,6 +3504,7 @@ class _CustomerDetailView extends StatelessWidget {
     required bool isAdmin,
   }) {
     final name = data['fullName']?.toString() ?? '';
+    final uniqueId = leadUniqueIdFromData(data);
     final mobile = data['mobileNumber']?.toString() ?? '';
     final email = data['email']?.toString() ?? '';
     final address = data['address']?.toString() ?? '';
@@ -3546,7 +3653,7 @@ class _CustomerDetailView extends StatelessWidget {
                               .doc(doc.id)
                               .delete();
                           await AuditLogService.write(
-                            page: 'Agricultural Customers',
+                            page: 'Agriculture Customers',
                             action: 'Deleted Customer',
                             description: 'Deleted customer "$name".',
                             targetId: doc.id,
@@ -3571,6 +3678,7 @@ class _CustomerDetailView extends StatelessWidget {
                   children: [
                     _excelCard('Personal Information', [
                       _xlRow('Full Name', name),
+                      _xlRow('Unique ID', uniqueId),
                       _xlRow('Mobile', mobile),
                       _xlRow('Email', email),
                       _xlRow('Gender', gender),
@@ -4329,7 +4437,7 @@ class _CustomerNotesCardState extends State<_CustomerNotesCard> {
         await batch.commit();
       }
       await AuditLogService.write(
-        page: 'Agricultural Customers',
+        page: 'Agriculture Customers',
         action: scheduledAt == null
             ? 'Added Customer Note'
             : 'Added Follow-up Task',

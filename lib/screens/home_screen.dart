@@ -20,10 +20,12 @@ import 'tabs/insurance_companies_tab.dart';
 import 'tabs/sales_tab.dart';
 import 'tabs/agent_performance_tab.dart';
 import 'tabs/reports_tab.dart';
+import 'tabs/invoices_tab.dart';
 import 'tabs/approve_expenses_tab.dart';
 import 'tabs/logs_tab.dart';
 import 'tabs/renewals_tab.dart';
 import 'tabs/company_revenue_tab.dart';
+import 'tabs/commission_settlement_tab.dart';
 import 'tabs/my_tasks_tab.dart';
 import 'tabs/my_performance_tab.dart';
 import 'tabs/data_transfer_tab.dart';
@@ -60,32 +62,32 @@ class _HomeScreenState extends State<HomeScreen> {
       icon: Icons.folder_open_rounded,
       pages: [
         _PageItem(
-          'Insurance Companies',
+          'All Companies',
           Icons.business_outlined,
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'Health Insurance',
+          'All Health insurance Companies & products',
           Icons.health_and_safety_outlined,
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'Life Insurance',
+          'All Life insurance Companies & products',
           Icons.shield_outlined,
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'General Insurance',
+          'All General insurance Companies & products',
           Icons.home_work_outlined,
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'Agricultural Insurance',
+          'All Agriculture insurance Companies & products',
           Icons.agriculture_outlined,
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'ECGC Insurance',
+          'All ECGC insurance Companies & products',
           Icons.public_outlined,
           allowedRoles: ['admin'],
         ),
@@ -101,13 +103,18 @@ class _HomeScreenState extends State<HomeScreen> {
       icon: Icons.send_to_mobile_outlined,
       pages: [
         _PageItem(
-          'Import Data',
+          'DataBank and send data to telecaller',
           Icons.move_to_inbox_outlined,
           allowedRoles: ['admin', 'manager'],
         ),
         _PageItem(
-          'Assign Data',
+          'Leads and send data to the team',
           Icons.support_agent_outlined,
+          allowedRoles: ['admin', 'manager', 'team_leader'],
+        ),
+        _PageItem(
+          'Transfer the leads employee to employee',
+          Icons.swap_horiz_rounded,
           allowedRoles: ['admin', 'manager', 'team_leader'],
         ),
       ],
@@ -119,21 +126,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _PageItem('Health Leads', Icons.health_and_safety_outlined),
         _PageItem('Life Leads', Icons.shield_outlined),
         _PageItem('General Leads', Icons.home_work_outlined),
-        _PageItem('Agricultural Leads', Icons.agriculture_outlined),
+        _PageItem('Agriculture Leads', Icons.agriculture_outlined),
         _PageItem('ECGC Leads', Icons.public_outlined),
       ],
     ),
-    _Category(
-      title: 'Customers',
-      icon: Icons.groups_outlined,
-      pages: [
-        _PageItem('Health Customers', Icons.health_and_safety_outlined),
-        _PageItem('Life Customers', Icons.shield_outlined),
-        _PageItem('General Customers', Icons.home_work_outlined),
-        _PageItem('Agricultural Customers', Icons.agriculture_outlined),
-        _PageItem('ECGC Customers', Icons.public_outlined),
-      ],
-    ),
+
     _Category(
       title: 'Policy Management',
       icon: Icons.assignment_outlined,
@@ -203,6 +200,11 @@ class _HomeScreenState extends State<HomeScreen> {
       icon: Icons.currency_rupee_rounded,
       pages: [
         _PageItem(
+          'Commission Settlement',
+          Icons.account_balance_wallet_outlined,
+          allowedRoles: ['admin'],
+        ),
+        _PageItem(
           'Health Revenue',
           Icons.favorite_border_rounded,
           allowedRoles: ['admin'],
@@ -218,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
           allowedRoles: ['admin'],
         ),
         _PageItem(
-          'Agricultural Revenue',
+          'Agriculture Revenue',
           Icons.agriculture_outlined,
           allowedRoles: ['admin'],
         ),
@@ -233,6 +235,11 @@ class _HomeScreenState extends State<HomeScreen> {
       title: 'Account Management',
       icon: Icons.manage_accounts_outlined,
       pages: [
+        _PageItem(
+          'Invoices',
+          Icons.receipt_long_rounded,
+          allowedRoles: ['admin'],
+        ),
         _PageItem('Reports', Icons.summarize_outlined, allowedRoles: ['admin']),
         _PageItem(
           'Approve Expenses',
@@ -252,7 +259,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool _canAccess(_PageItem p) {
     if (_userRole == 'executive' &&
-        (p.label == 'Data Transfer Field' || p.label.endsWith(' Customers'))) {
+        (p.label == 'Data Transfer Field' ||
+            p.label == 'Data Field' ||
+            p.label.endsWith(' Customers'))) {
       return false;
     }
     final permissionRole =
@@ -300,10 +309,10 @@ class _HomeScreenState extends State<HomeScreen> {
           initialView: 'Leads',
           lockView: true,
         );
-      case 'Agricultural Leads':
-        return AgriculturalCustomersTab(
+      case 'Agriculture Leads':
+        return AgricultureCustomersTab(
           currentUser: d,
-          title: 'Agricultural Leads',
+          title: 'Agriculture Leads',
           initialView: 'Leads',
           lockView: true,
         );
@@ -315,88 +324,141 @@ class _HomeScreenState extends State<HomeScreen> {
           lockView: true,
         );
       case 'Health Customers':
+        final pendingCustomerId = _takePendingCustomerId('Health Customers');
         return AllCustomersTab(
           currentUser: d,
           title: 'Health Customers',
           initialView: 'Policy Holders',
           lockView: true,
-          initialCustomerId: _takePendingCustomerId('Health Customers'),
+          initialCustomerId: pendingCustomerId,
+          onBackToPolicyHolders: pendingCustomerId == null
+              ? null
+              : _returnToPolicyHolders,
         );
       case 'Life Customers':
+        final pendingCustomerId = _takePendingCustomerId('Life Customers');
         return LifeCustomersTab(
           currentUser: d,
           title: 'Life Customers',
           initialView: 'Policy Holders',
           lockView: true,
-          initialCustomerId: _takePendingCustomerId('Life Customers'),
+          initialCustomerId: pendingCustomerId,
+          onBackToPolicyHolders: pendingCustomerId == null
+              ? null
+              : _returnToPolicyHolders,
         );
       case 'General Customers':
+        final pendingCustomerId = _takePendingCustomerId('General Customers');
         return GeneralCustomersTab(
           currentUser: d,
           title: 'General Customers',
           initialView: 'Policy Holders',
           lockView: true,
-          initialCustomerId: _takePendingCustomerId('General Customers'),
+          initialCustomerId: pendingCustomerId,
+          onBackToPolicyHolders: pendingCustomerId == null
+              ? null
+              : _returnToPolicyHolders,
         );
-      case 'Agricultural Customers':
-        return AgriculturalCustomersTab(
+      case 'Agriculture Customers':
+        final pendingCustomerId = _takePendingCustomerId(
+          'Agriculture Customers',
+        );
+        return AgricultureCustomersTab(
           currentUser: d,
-          title: 'Agricultural Customers',
+          title: 'Agriculture Customers',
           initialView: 'Policy Holders',
           lockView: true,
-          initialCustomerId: _takePendingCustomerId('Agricultural Customers'),
+          initialCustomerId: pendingCustomerId,
+          onBackToPolicyHolders: pendingCustomerId == null
+              ? null
+              : _returnToPolicyHolders,
         );
       case 'ECGC Customers':
+        final pendingCustomerId = _takePendingCustomerId('ECGC Customers');
         return EcgcCustomersTab(
           currentUser: d,
           title: 'ECGC Customers',
           initialView: 'Policy Holders',
           lockView: true,
-          initialCustomerId: _takePendingCustomerId('ECGC Customers'),
+          initialCustomerId: pendingCustomerId,
+          onBackToPolicyHolders: pendingCustomerId == null
+              ? null
+              : _returnToPolicyHolders,
         );
       case 'Policy Holders':
         return ActiveCustomersTab(
           onOpenCustomerNotes: _openCustomerNotesFromPolicy,
         );
       case 'Health Insurance':
-        return const PoliciesTab();
+      case 'All Health insurance Companies & products':
+        return const PoliciesTab(
+          title: 'All Health insurance Companies & products',
+        );
       case 'General Insurance':
-        return const GeneralPoliciesTab();
-      case 'Agricultural Insurance':
-        return const AgriculturalPoliciesTab();
+      case 'All General insurance Companies & products':
+        return const GeneralPoliciesTab(
+          title: 'All General insurance Companies & products',
+        );
+      case 'Agriculture Insurance':
+      case 'All Agriculture insurance Companies & products':
+        return const AgriculturePoliciesTab(
+          title: 'All Agriculture insurance Companies & products',
+        );
       case 'ECGC Insurance':
-        return const EcgcPoliciesTab();
+      case 'All ECGC insurance Companies & products':
+        return const EcgcPoliciesTab(
+          title: 'All ECGC insurance Companies & products',
+        );
       case 'Life Insurance':
-        return const LifePoliciesTab();
+      case 'All Life insurance Companies & products':
+        return const LifePoliciesTab(
+          title: 'All Life insurance Companies & products',
+        );
       case 'Claims':
         return ClaimsTab(currentUser: d);
       case 'Employees':
         return const AgentsTab();
+      case 'All Companies':
       case 'Insurance Companies':
         return const InsuranceCompaniesTab();
       case 'Sales':
         return SalesTab(userData: d);
       case 'Health Revenue':
         return const CompanyRevenueTab(
+          key: ValueKey('Health Revenue'),
           category: 'Health',
           title: 'Health Revenue',
         );
       case 'Life Revenue':
-        return const CompanyRevenueTab(category: 'Life', title: 'Life Revenue');
+        return const CompanyRevenueTab(
+          key: ValueKey('Life Revenue'),
+          category: 'Life',
+          title: 'Life Revenue',
+        );
       case 'General Revenue':
         return const CompanyRevenueTab(
+          key: ValueKey('General Revenue'),
           category: 'General',
           title: 'General Revenue',
         );
-      case 'Agricultural Revenue':
+      case 'Agriculture Revenue':
         return const CompanyRevenueTab(
-          category: 'Agricultural',
-          title: 'Agricultural Revenue',
+          key: ValueKey('Agriculture Revenue'),
+          category: 'Agriculture',
+          title: 'Agriculture Revenue',
         );
       case 'ECGC Revenue':
-        return const CompanyRevenueTab(category: 'ECGC', title: 'ECGC Revenue');
+        return const CompanyRevenueTab(
+          key: ValueKey('ECGC Revenue'),
+          category: 'ECGC',
+          title: 'ECGC Revenue',
+        );
+      case 'Commission Settlement':
+        return const CommissionSettlementTab();
       case 'Reports':
         return ReportsTab(userData: d);
+      case 'Invoices':
+        return const InvoicesTab();
       case 'Approve Expenses':
         return ApproveExpensesTab(userData: d);
       case 'Expenses':
@@ -410,11 +472,22 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'My Performance':
         return MyPerformanceTab(userData: d);
       case 'Import Data':
+      case 'DataBank':
+      case 'DataBank and send data to telecaller':
+      case 'Import & Assign Data':
         return DataTransferTab(userData: d, page: DataTransferPage.importData);
       case 'Assign Data':
-        return DataTransferTab(userData: d, page: DataTransferPage.assignData);
+      case 'Send data to telecallers':
+      case 'Leads and send data to the team':
+      case 'Assign Leads':
+      case 'Data Field':
       case 'Data Transfer Field':
         return DataTransferTab(userData: d, page: DataTransferPage.assignData);
+      case 'Transfer the leads employee to employee':
+        return DataTransferTab(
+          userData: d,
+          page: DataTransferPage.transferLeads,
+        );
       case 'My Assigned Leads':
         return _roleDashboard();
       default:
@@ -451,14 +524,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ? 'Life Customers'
         : normalized == 'general'
         ? 'General Customers'
-        : normalized == 'agricultural'
-        ? 'Agricultural Customers'
+        : normalized == 'agriculture' || normalized == 'agricultural'
+        ? 'Agriculture Customers'
         : normalized == 'ecgc'
         ? 'ECGC Customers'
         : 'Health Customers';
     setState(() {
       _pendingCustomerId = customerId;
       _activePageLabel = label;
+    });
+  }
+
+  void _returnToPolicyHolders() {
+    setState(() {
+      _pendingCustomerId = null;
+      _activePageLabel = 'Policy Holders';
     });
   }
 
@@ -573,26 +653,61 @@ class _BrandBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 520;
     return Container(
       color: _primary,
       padding: EdgeInsets.fromLTRB(
-        isWide ? 34 : 18,
-        MediaQuery.of(context).padding.top + (isWide ? 14 : 12),
-        isWide ? 20 : 12,
-        isWide ? 14 : 12,
+        isWide
+            ? 34
+            : compact
+            ? 10
+            : 14,
+        MediaQuery.of(context).padding.top +
+            (isWide
+                ? 14
+                : compact
+                ? 7
+                : 10),
+        isWide
+            ? 20
+            : compact
+            ? 6
+            : 10,
+        isWide
+            ? 14
+            : compact
+            ? 7
+            : 10,
       ),
       child: Row(
         children: [
           Container(
-            width: isWide ? 260 : 184,
-            height: isWide ? 76 : 60,
+            width: isWide
+                ? 260
+                : compact
+                ? 116
+                : 154,
+            height: isWide
+                ? 76
+                : compact
+                ? 38
+                : 50,
             padding: EdgeInsets.symmetric(
-              horizontal: isWide ? 18 : 12,
-              vertical: isWide ? 9 : 8,
+              horizontal: isWide
+                  ? 18
+                  : compact
+                  ? 7
+                  : 10,
+              vertical: isWide
+                  ? 9
+                  : compact
+                  ? 5
+                  : 7,
             ),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(compact ? 7 : 10),
             ),
             child: Image.asset(
               'assets/images/Makk-Finsol-logo.png',
@@ -600,23 +715,23 @@ class _BrandBar extends StatelessWidget {
               filterQuality: FilterQuality.high,
             ),
           ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: const Text(
-              'Insurance Management',
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 10,
-                fontWeight: FontWeight.w400,
-                letterSpacing: 0.2,
+          SizedBox(width: compact ? 6 : 12),
+          if (!compact)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: const Text(
+                'Insurance Management',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w400,
+                ),
               ),
             ),
-          ),
           const Spacer(),
           if (isWide) ...[
             Text(
@@ -626,38 +741,48 @@ class _BrandBar extends StatelessWidget {
             const SizedBox(width: 10),
           ],
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            constraints: BoxConstraints(maxWidth: compact ? 88 : 150),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 7 : 10,
+              vertical: compact ? 2 : 3,
+            ),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
               role.replaceAll('_', ' ').toUpperCase(),
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: Colors.white70,
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 0.4,
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: compact ? 4 : 10),
           _NotificationBell(userData: userData),
-          const SizedBox(width: 8),
-          CircleAvatar(
-            radius: 15,
-            backgroundColor: Colors.white.withOpacity(0.12),
-            child: Text(
-              name.isNotEmpty ? name[0].toUpperCase() : 'A',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+          SizedBox(width: compact ? 3 : 8),
+          if (!compact)
+            CircleAvatar(
+              radius: 15,
+              backgroundColor: Colors.white.withOpacity(0.12),
+              child: Text(
+                name.isNotEmpty ? name[0].toUpperCase() : 'A',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 2),
+          SizedBox(width: compact ? 0 : 2),
           IconButton(
+            constraints: BoxConstraints.tightFor(
+              width: compact ? 34 : 40,
+              height: compact ? 34 : 40,
+            ),
+            padding: EdgeInsets.zero,
             icon: const Icon(
               Icons.logout_rounded,
               color: Colors.white38,

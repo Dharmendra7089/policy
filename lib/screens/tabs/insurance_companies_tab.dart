@@ -6,7 +6,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../../widgets/company_logo.dart';
-import '../../widgets/list_serial_number.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LOG SERVICE  — shared utility used by all tabs
@@ -157,15 +156,25 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                         (data['registrationNumber'] ?? '')
                             .toString()
                             .toLowerCase()
+                            .contains(_search) ||
+                        (data['invoiceCode'] ?? data['invoiceCodePrefix'] ?? '')
+                            .toString()
+                            .toLowerCase()
                             .contains(_search);
                   }).toList();
                 }
+                docs.sort(_compareCompanyName);
                 if (docs.isEmpty) return _buildEmpty(context);
-                return ListView.separated(
+                return GridView.builder(
                   padding: const EdgeInsets.all(20),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 16,
+                    childAspectRatio: 3.05,
+                  ),
                   itemCount: docs.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _CompanyRow(
+                  itemBuilder: (context, i) => _CompanyGridCard(
                     doc: docs[i],
                     serialNumber: i + 1,
                     onTap: () => setState(() => _selectedDoc = docs[i]),
@@ -176,6 +185,15 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
           ),
         ],
       ),
+    );
+  }
+
+  static int _compareCompanyName(
+    QueryDocumentSnapshot<Map<String, dynamic>> a,
+    QueryDocumentSnapshot<Map<String, dynamic>> b,
+  ) {
+    return (a.data()['companyName'] ?? '').toString().toLowerCase().compareTo(
+      (b.data()['companyName'] ?? '').toString().toLowerCase(),
     );
   }
 
@@ -192,7 +210,7 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Insurance Companies',
+                      'All Companies',
                       style: TextStyle(
                         color: _textMain,
                         fontSize: 18,
@@ -338,6 +356,9 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
     final irdaiCode = TextEditingController(
       text: existing?['irdaiLicenseCode'] ?? '',
     );
+    final invoiceCode = TextEditingController(
+      text: existing?['invoiceCode'] ?? existing?['invoiceCodePrefix'] ?? '',
+    );
     final website = TextEditingController(text: existing?['website'] ?? '');
     final headOffice = TextEditingController(
       text: existing?['headOfficeAddress'] ?? '',
@@ -472,6 +493,13 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
             final nameValue = _clean(companyName);
             final registrationValue = _clean(registrationNo).toUpperCase();
             final serialValue = _clean(serialNo).toUpperCase();
+            final invoiceCodeValue = _clean(invoiceCode)
+                .toUpperCase()
+                .replaceFirst(RegExp(r'[-/]\d+$'), '')
+                .replaceAll(RegExp(r'[^A-Z0-9_/]+'), '_')
+                .replaceAll(RegExp(r'_+'), '_')
+                .replaceAll(RegExp(r'/+'), '/')
+                .replaceAll(RegExp(r'^_+|_+$'), '');
             final emailValue = _clean(email).toLowerCase();
             final phoneValue = _clean(phone);
             final websiteValue = _clean(website);
@@ -550,6 +578,34 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                 );
                 return;
               }
+              if (invoiceCodeValue.isNotEmpty) {
+                final duplicateInvoiceCode = await FirebaseFirestore.instance
+                    .collection('insurance_companies')
+                    .where('invoiceCode', isEqualTo: invoiceCodeValue)
+                    .limit(1)
+                    .get();
+                if (duplicateInvoiceCode.docs.isNotEmpty &&
+                    duplicateInvoiceCode.docs.first.id != docId) {
+                  setS(() => isSaving = false);
+                  _showError(
+                    'This invoice code is already used by another company.',
+                  );
+                  return;
+                }
+                final duplicateOldInvoiceCode = await FirebaseFirestore.instance
+                    .collection('insurance_companies')
+                    .where('invoiceCodePrefix', isEqualTo: invoiceCodeValue)
+                    .limit(1)
+                    .get();
+                if (duplicateOldInvoiceCode.docs.isNotEmpty &&
+                    duplicateOldInvoiceCode.docs.first.id != docId) {
+                  setS(() => isSaving = false);
+                  _showError(
+                    'This invoice code is already used by another company.',
+                  );
+                  return;
+                }
+              }
 
               final contactsData = contacts
                   .where((c) => c['name']!.text.trim().isNotEmpty)
@@ -569,6 +625,8 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                 'serialNo': serialValue,
                 'registrationNumber': registrationValue,
                 'irdaiLicenseCode': _clean(irdaiCode).toUpperCase(),
+                'invoiceCode': invoiceCodeValue,
+                'invoiceCodePrefix': invoiceCodeValue,
                 'companyType': selectedType,
                 'status': selectedStatus,
                 'email': emailValue,
@@ -579,7 +637,7 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                 'solvencyRatio': solvencyValue ?? 0,
                 'contacts': contactsData,
                 'searchKey':
-                    '$nameValue $serialValue $registrationValue $selectedType'
+                    '$nameValue $serialValue $registrationValue $invoiceCodeValue $selectedType'
                         .toLowerCase(),
                 'updatedAt': FieldValue.serverTimestamp(),
               };
@@ -848,6 +906,10 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
                     _row2(
                       _tf('Registration Number *', registrationNo),
                       _tf('IRDAI License Code', irdaiCode),
+                    ),
+                    _row2(
+                      _tf('Invoice Code', invoiceCode),
+                      const SizedBox.shrink(),
                     ),
                     _row2(
                       _drop(
@@ -1122,28 +1184,37 @@ class _InsuranceCompaniesTabState extends State<InsuranceCompaniesTab> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPANY ROW  — slim list tile
+// COMPANY GRID CARD  — visual grid block
 // ─────────────────────────────────────────────────────────────────────────────
-class _CompanyRow extends StatelessWidget {
+class _CompanyGridCard extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> doc;
   final int serialNumber;
   final VoidCallback onTap;
 
-  static const _surface = Color(0xFFFFFFFF);
-  static const _border = Color(0xFFE4E7EC);
-  static const _textMain = Color(0xFF0D1B2A);
-  static const _textMuted = Color(0xFF8A94A6);
-  static const _red = Color(0xFFDC2626);
-
-  const _CompanyRow({
+  const _CompanyGridCard({
     required this.doc,
     required this.serialNumber,
     required this.onTap,
   });
 
   @override
+  State<_CompanyGridCard> createState() => _CompanyGridCardState();
+}
+
+class _CompanyGridCardState extends State<_CompanyGridCard> {
+  bool _isHovered = false;
+
+  static const _surface = Color(0xFFFFFFFF);
+  static const _border = Color(0xFFE4E7EC);
+  static const _textMain = Color(0xFF0D1B2A);
+  static const _textMuted = Color(0xFF8A94A6);
+  static const _red = Color(0xFFDC2626);
+  static const _accent = Color(0xFF1A6EBD);
+  static const _bg = Color(0xFFF4F6F9);
+
+  @override
   Widget build(BuildContext context) {
-    final data = doc.data();
+    final data = widget.doc.data();
     final name = data['companyName'] ?? '';
     final website = data['website'] ?? '';
     final logoUrl = data['logoUrl'] ?? '';
@@ -1153,73 +1224,139 @@ class _CompanyRow extends StatelessWidget {
     final status = data['status'] ?? 'Active';
     final isActive = status == 'Active';
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: _surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _border),
-        ),
-        child: Row(
-          children: [
-            ListSerialNumber(number: serialNumber),
-            const SizedBox(width: 10),
-            CompanyLogo(
-              companyName: name.toString(),
-              website: website.toString(),
-              customLogoUrl: logoUrl.toString(),
-              size: 36,
-              radius: 10,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _isHovered ? _accent : _border,
+              width: _isHovered ? 1.5 : 1.0,
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
+            boxShadow: [
+              if (_isHovered)
+                BoxShadow(
+                  color: _accent.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                )
+              else
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+            ],
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // Serial Number Indicator in Top-Left
+              Positioned(
+                top: -8,
+                left: -8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _bg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Text(
+                    '#${widget.serialNumber}',
                     style: const TextStyle(
-                      color: _textMain,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                      color: _textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    serialNo.toString().isEmpty
-                        ? type
-                        : '$type • S/N ${serialNo.toString()}',
-                    style: const TextStyle(color: _textMuted, fontSize: 12),
+                ),
+              ),
+              // Status Badge in Top-Right
+              Positioned(
+                top: -8,
+                right: -8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? Colors.green.withValues(alpha: 0.08)
+                        : _red.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: isActive ? Colors.green.shade700 : _red,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(width: 4),
+                  // Large Company Logo
+                  CompanyLogo(
+                    companyName: name.toString(),
+                    website: website.toString(),
+                    customLogoUrl: logoUrl.toString(),
+                    size: 64,
+                    radius: 12,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textMain,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            height: 1.25,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        // Type & S/N
+                        Text(
+                          serialNo.toString().isEmpty
+                              ? type
+                              : '$type • S/N ${serialNo.toString()}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? Colors.green.withValues(alpha: 0.08)
-                    : _red.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                status,
-                style: TextStyle(
-                  color: isActive ? Colors.green.shade700 : _red,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 18,
-              color: Color(0xFF8A94A6),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1273,6 +1410,8 @@ class _CompanyDetailView extends StatelessWidget {
         data['serialNumber'] ?? data['serialNo'] ?? data['srNo'] ?? '';
     final regNo = data['registrationNumber'] ?? '';
     final irdai = data['irdaiLicenseCode'] ?? '';
+    final invoiceCode = data['invoiceCode'] ?? data['invoiceCodePrefix'] ?? '';
+    final invoiceCount = data['invoiceCount'];
     final website = data['website'] ?? '';
     final logoUrl = data['logoUrl'] ?? '';
     final address = data['headOfficeAddress'] ?? '';
@@ -1474,6 +1613,17 @@ class _CompanyDetailView extends StatelessWidget {
                         'IRDAI License Code',
                         irdai,
                       ),
+                    if (invoiceCode.toString().isNotEmpty)
+                      _detailRow(
+                        Icons.receipt_long_outlined,
+                        'Invoice Code',
+                        invoiceCode.toString(),
+                      ),
+                    _detailRow(
+                      Icons.format_list_numbered_rounded,
+                      'Generated Invoices',
+                      '${(invoiceCount as num?)?.toInt() ?? 0}',
+                    ),
                     if (type.isNotEmpty)
                       _detailRow(Icons.category_outlined, 'Company Type', type),
                   ]),

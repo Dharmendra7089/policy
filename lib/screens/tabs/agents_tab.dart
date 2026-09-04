@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../utils/audit_log_service.dart';
 import '../../widgets/list_serial_number.dart';
@@ -33,12 +37,12 @@ class _AgentsTabState extends State<AgentsTab>
       Color(0xFF0891B2),
     ),
     _Role(
-      'Managers',
-      'Manager',
-      'manager',
+      'Executives',
+      'Executive',
+      'executive',
       'agents',
-      Icons.manage_accounts_outlined,
-      Color(0xFF7C3AED),
+      Icons.badge_outlined,
+      Color(0xFF059669),
     ),
     _Role(
       'Team Leaders',
@@ -49,12 +53,12 @@ class _AgentsTabState extends State<AgentsTab>
       Color(0xFFD97706),
     ),
     _Role(
-      'Executives',
-      'Executive',
-      'executive',
+      'Managers',
+      'Manager',
+      'manager',
       'agents',
-      Icons.badge_outlined,
-      Color(0xFF059669),
+      Icons.manage_accounts_outlined,
+      Color(0xFF7C3AED),
     ),
     _Role(
       'Admins',
@@ -137,7 +141,7 @@ class _AgentsTabState extends State<AgentsTab>
               ),
               SizedBox(height: 3),
               Text(
-                'People, roles, and Google login access in one place',
+                'People, roles, and employee login access in one place',
                 style: TextStyle(color: _muted, fontSize: 12),
               ),
             ],
@@ -468,6 +472,7 @@ class _AgentsTabState extends State<AgentsTab>
     if (!mounted) return;
     final name = TextEditingController(text: old['name']?.toString() ?? '');
     final email = TextEditingController(text: old['email']?.toString() ?? '');
+    final password = TextEditingController();
     final phone = TextEditingController(text: old['phone']?.toString() ?? '');
     var active =
         old.isEmpty ||
@@ -486,6 +491,7 @@ class _AgentsTabState extends State<AgentsTab>
             setLocal(() => saving = true);
             try {
               final normalizedEmail = email.text.trim().toLowerCase();
+              final passwordValue = password.text.trim();
               for (final collection in const ['agents', 'admins']) {
                 for (final field in const ['email', 'loginEmail']) {
                   final matches = await FirebaseFirestore.instance
@@ -500,6 +506,7 @@ class _AgentsTabState extends State<AgentsTab>
                   );
                   if (duplicate) {
                     _error('This email is already registered in Employees.');
+                    setLocal(() => saving = false);
                     return;
                   }
                 }
@@ -510,12 +517,27 @@ class _AgentsTabState extends State<AgentsTab>
                     )
                   : null;
               final teamLeaderData = selectedTeamLeader?.data();
+              String? authUid = (old['uid'] ?? '').toString().trim();
+              if (!editing || passwordValue.isNotEmpty || authUid.isEmpty) {
+                if (passwordValue.isEmpty) {
+                  _error('Enter a login password for this employee.');
+                  setLocal(() => saving = false);
+                  return;
+                }
+                final createdUid = await _createEmployeeAuthUser(
+                  email: normalizedEmail,
+                  password: passwordValue,
+                );
+                authUid = createdUid;
+              }
               if (editing) {
                 final oldEmail = (old['email'] ?? '').toString().toLowerCase();
                 final hasLogin = (old['uid'] ?? '').toString().isNotEmpty;
                 await existing.reference.update({
                   'name': name.text.trim(),
                   'email': normalizedEmail,
+                  'uid': authUid,
+                  'hasPasswordLogin': true,
                   if (hasLogin && old['loginEmail'] == null)
                     'loginEmail': oldEmail,
                   'phone': phone.text.trim(),
@@ -536,10 +558,11 @@ class _AgentsTabState extends State<AgentsTab>
                 await FirebaseFirestore.instance
                     .collection(role.collection)
                     .add({
-                      'uid': '',
+                      'uid': authUid,
                       'name': name.text.trim(),
                       'email': normalizedEmail,
                       'username': email.text.trim().split('@').first,
+                      'hasPasswordLogin': true,
                       'phone': phone.text.trim(),
                       'role': role.value,
                       'roleLabel': role.singular,
@@ -621,6 +644,17 @@ class _AgentsTabState extends State<AgentsTab>
                         keyboard: TextInputType.emailAddress,
                         validator: _emailValidator,
                       ),
+                      const SizedBox(height: 12),
+                      _input(
+                        password,
+                        editing
+                            ? 'New password (leave blank to keep existing)'
+                            : 'Login password',
+                        Icons.lock_outline_rounded,
+                        validator: (value) =>
+                            _passwordValidator(value, required: !editing),
+                        obscure: true,
+                      ),
                       if (role.value == 'executive') ...[
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
@@ -655,9 +689,9 @@ class _AgentsTabState extends State<AgentsTab>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        editing && (old['uid'] ?? '').toString().isNotEmpty
-                            ? 'This changes the employee profile email. Their existing login email remains valid.'
-                            : 'This email will be allowed to sign in. No password is stored here.',
+                        editing
+                            ? 'Leave password blank to keep the existing login. Enter a new password only for profiles without login access.'
+                            : 'This email and password will be used on the login screen.',
                         style: TextStyle(color: _muted, fontSize: 11),
                       ),
                       if (editing) ...[
@@ -693,7 +727,7 @@ class _AgentsTabState extends State<AgentsTab>
                           strokeWidth: 2,
                         ),
                       )
-                    : Text(editing ? 'Save Changes' : 'Allow Google Login'),
+                    : Text(editing ? 'Save Changes' : 'Create Login'),
               ),
             ],
           );
@@ -702,7 +736,40 @@ class _AgentsTabState extends State<AgentsTab>
     );
     name.dispose();
     email.dispose();
+    password.dispose();
     phone.dispose();
+  }
+
+  Future<String> _createEmployeeAuthUser({
+    required String email,
+    required String password,
+  }) async {
+    final apiKey = Firebase.app().options.apiKey;
+    final response = await http.post(
+      Uri.parse(
+        'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$apiKey',
+      ),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+        'returnSecureToken': false,
+      }),
+    );
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return (body['localId'] ?? '').toString();
+    }
+    final error = (body['error'] as Map?)?['message']?.toString() ?? '';
+    if (error == 'EMAIL_EXISTS') {
+      throw Exception(
+        'This email already has a Firebase login. Leave password blank while editing, or use another email.',
+      );
+    }
+    if (error == 'WEAK_PASSWORD : Password should be at least 6 characters') {
+      throw Exception('Password should be at least 6 characters.');
+    }
+    throw Exception(error.isEmpty ? 'Could not create employee login.' : error);
   }
 
   Widget _input(
@@ -712,10 +779,12 @@ class _AgentsTabState extends State<AgentsTab>
     bool enabled = true,
     TextInputType? keyboard,
     String? Function(String?)? validator,
+    bool obscure = false,
   }) => TextFormField(
     controller: controller,
     enabled: enabled,
     keyboardType: keyboard,
+    obscureText: obscure,
     validator: validator,
     decoration: _decoration(label, icon),
   );
@@ -740,6 +809,14 @@ class _AgentsTabState extends State<AgentsTab>
     if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim())) {
       return 'Enter a valid email address.';
     }
+    return null;
+  }
+
+  String? _passwordValidator(String? value, {required bool required}) {
+    final password = value?.trim() ?? '';
+    if (!required && password.isEmpty) return null;
+    if (password.isEmpty) return 'Enter a login password.';
+    if (password.length < 6) return 'Password must be at least 6 characters.';
     return null;
   }
 

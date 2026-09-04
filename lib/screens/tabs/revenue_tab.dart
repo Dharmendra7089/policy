@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../utils/lead_serial_fields.dart';
+
 class RevenueTab extends StatefulWidget {
   const RevenueTab({super.key});
 
@@ -72,28 +74,38 @@ class _RevenueTabState extends State<RevenueTab> {
 
                   final rawDocs = snap.data?.docs ?? [];
 
-                  final companies = <String>{
-                    'All',
-                    ...rawDocs
-                        .map((d) => (d.data()['companyName'] ?? '').toString().trim())
-                        .where((e) => e.isNotEmpty),
-                  }.toList()
-                    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+                  final companies =
+                      <String>{
+                        'All',
+                        ...rawDocs
+                            .map(
+                              (d) => (d.data()['companyName'] ?? '')
+                                  .toString()
+                                  .trim(),
+                            )
+                            .where((e) => e.isNotEmpty),
+                      }.toList()..sort(
+                        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+                      );
 
                   final docs = _applyFilters(rawDocs);
 
                   final totalRevenue = docs.fold<double>(
                     0,
-                        (sum, d) => sum + _toDouble(d.data()['revenue']),
+                    (sum, d) => sum + _toDouble(d.data()['revenue']),
                   );
                   final totalPremium = docs.fold<double>(
                     0,
-                        (sum, d) => sum + _toDouble(d.data()['premium']),
+                    (sum, d) => sum + _toDouble(d.data()['premium']),
                   );
                   final totalCommission = docs.fold<double>(
                     0,
-                        (sum, d) =>
-                    sum + _toDouble(d.data()['commissionAmount'] ?? d.data()['commission']),
+                    (sum, d) =>
+                        sum +
+                        _toDouble(
+                          d.data()['commissionAmount'] ??
+                              d.data()['commission'],
+                        ),
                   );
                   final totalPolicies = docs.length;
 
@@ -101,7 +113,8 @@ class _RevenueTabState extends State<RevenueTab> {
                     return _buildEmptyState(
                       icon: Icons.account_balance_wallet_outlined,
                       title: 'No revenue records yet',
-                      subtitle: 'Revenue entries will appear here after policies are linked.',
+                      subtitle:
+                          'Revenue entries will appear here after policies are linked.',
                     );
                   }
 
@@ -126,10 +139,11 @@ class _RevenueTabState extends State<RevenueTab> {
                       Expanded(
                         child: docs.isEmpty
                             ? _buildEmptyState(
-                          icon: Icons.filter_alt_off_rounded,
-                          title: 'No matching revenue found',
-                          subtitle: 'Try changing search, company, status, or sorting.',
-                        )
+                                icon: Icons.filter_alt_off_rounded,
+                                title: 'No matching revenue found',
+                                subtitle:
+                                    'Try changing search, company, status, or sorting.',
+                              )
                             : isWide
                             ? _buildDesktopTable(docs)
                             : _buildMobileList(docs),
@@ -166,10 +180,7 @@ class _RevenueTabState extends State<RevenueTab> {
                 SizedBox(height: 4),
                 Text(
                   'Track commissions, premium collections, company-wise revenue, and policy dates.',
-                  style: TextStyle(
-                    color: _textMuted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: _textMuted, fontSize: 12),
                 ),
               ],
             ),
@@ -240,12 +251,12 @@ class _RevenueTabState extends State<RevenueTab> {
         children: cards
             .map(
               (e) => Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(right: e == cards.last ? 0 : 12),
-              child: _StatCard(data: e),
-            ),
-          ),
-        )
+                child: Padding(
+                  padding: EdgeInsets.only(right: e == cards.last ? 0 : 12),
+                  child: _StatCard(data: e),
+                ),
+              ),
+            )
             .toList(),
       );
     }
@@ -303,7 +314,12 @@ class _RevenueTabState extends State<RevenueTab> {
     ];
 
     final companyItems = companies
-        .map((c) => DropdownMenuItem(value: c, child: Text(c == 'All' ? 'All Companies' : c)))
+        .map(
+          (c) => DropdownMenuItem(
+            value: c,
+            child: Text(c == 'All' ? 'All Companies' : c),
+          ),
+        )
         .toList();
 
     return Container(
@@ -315,74 +331,78 @@ class _RevenueTabState extends State<RevenueTab> {
       ),
       child: isWide
           ? Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: _searchField(),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: _dropdownBox<String>(
-              value: _selectedCompany,
-              items: companyItems,
-              onChanged: (v) => setState(() => _selectedCompany = v ?? 'All'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: _dropdownBox<String>(
-              value: _selectedStatus,
-              items: statusItems,
-              onChanged: (v) => setState(() => _selectedStatus = v ?? 'All'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: _dropdownBox<_RevenueSortField>(
-              value: _sortField,
-              items: sortItems,
-              onChanged: (v) => setState(() => _sortField = v ?? _RevenueSortField.startDate),
-            ),
-          ),
-          const SizedBox(width: 12),
-          _sortToggle(),
-        ],
-      )
-          : Column(
-        children: [
-          _searchField(),
-          const SizedBox(height: 12),
-          _dropdownBox<String>(
-            value: _selectedCompany,
-            items: companyItems,
-            onChanged: (v) => setState(() => _selectedCompany = v ?? 'All'),
-          ),
-          const SizedBox(height: 12),
-          _dropdownBox<String>(
-            value: _selectedStatus,
-            items: statusItems,
-            onChanged: (v) => setState(() => _selectedStatus = v ?? 'All'),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _dropdownBox<_RevenueSortField>(
-                  value: _sortField,
-                  items: sortItems,
-                  onChanged: (v) =>
-                      setState(() => _sortField = v ?? _RevenueSortField.startDate),
+              children: [
+                Expanded(flex: 3, child: _searchField()),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: _dropdownBox<String>(
+                    value: _selectedCompany,
+                    items: companyItems,
+                    onChanged: (v) =>
+                        setState(() => _selectedCompany = v ?? 'All'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              _sortToggle(),
-            ],
-          ),
-        ],
-      ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: _dropdownBox<String>(
+                    value: _selectedStatus,
+                    items: statusItems,
+                    onChanged: (v) =>
+                        setState(() => _selectedStatus = v ?? 'All'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: _dropdownBox<_RevenueSortField>(
+                    value: _sortField,
+                    items: sortItems,
+                    onChanged: (v) => setState(
+                      () => _sortField = v ?? _RevenueSortField.startDate,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _sortToggle(),
+              ],
+            )
+          : Column(
+              children: [
+                _searchField(),
+                const SizedBox(height: 12),
+                _dropdownBox<String>(
+                  value: _selectedCompany,
+                  items: companyItems,
+                  onChanged: (v) =>
+                      setState(() => _selectedCompany = v ?? 'All'),
+                ),
+                const SizedBox(height: 12),
+                _dropdownBox<String>(
+                  value: _selectedStatus,
+                  items: statusItems,
+                  onChanged: (v) =>
+                      setState(() => _selectedStatus = v ?? 'All'),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _dropdownBox<_RevenueSortField>(
+                        value: _sortField,
+                        items: sortItems,
+                        onChanged: (v) => setState(
+                          () => _sortField = v ?? _RevenueSortField.startDate,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _sortToggle(),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 
@@ -391,9 +411,14 @@ class _RevenueTabState extends State<RevenueTab> {
       controller: _searchCtrl,
       onChanged: (v) => setState(() => _search = v.toLowerCase().trim()),
       decoration: InputDecoration(
-        hintText: 'Search by customer, policy, company, policy number, or mobile...',
+        hintText:
+            'Search by customer, policy, company, policy number, or mobile...',
         hintStyle: const TextStyle(color: _textMuted, fontSize: 13),
-        prefixIcon: const Icon(Icons.search_rounded, color: _textMuted, size: 18),
+        prefixIcon: const Icon(
+          Icons.search_rounded,
+          color: _textMuted,
+          size: 18,
+        ),
         filled: true,
         fillColor: _bg,
         contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -429,7 +454,9 @@ class _RevenueTabState extends State<RevenueTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              _sortAsc ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+              _sortAsc
+                  ? Icons.arrow_upward_rounded
+                  : Icons.arrow_downward_rounded,
               size: 16,
               color: _primary,
             ),
@@ -448,7 +475,9 @@ class _RevenueTabState extends State<RevenueTab> {
     );
   }
 
-  Widget _buildDesktopTable(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildDesktopTable(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Container(
@@ -469,8 +498,10 @@ class _RevenueTabState extends State<RevenueTab> {
               child: const Row(
                 children: [
                   _TableHead(width: 140, label: 'Customer'),
+                  _TableHead(width: 120, label: 'Unique ID'),
                   _TableHead(width: 130, label: 'Company'),
                   _TableHead(width: 150, label: 'Policy'),
+                  _TableHead(width: 130, label: 'Policy No.'),
                   _TableHead(width: 100, label: 'Premium'),
                   _TableHead(width: 100, label: 'Comm. %'),
                   _TableHead(width: 120, label: 'Comm. Amount'),
@@ -485,7 +516,8 @@ class _RevenueTabState extends State<RevenueTab> {
             Expanded(
               child: ListView.separated(
                 itemCount: docs.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, color: _border),
+                separatorBuilder: (_, __) =>
+                    const Divider(height: 1, color: _border),
                 itemBuilder: (_, i) {
                   final d = docs[i].data();
                   return _RevenueTableRow(data: d);
@@ -498,7 +530,9 @@ class _RevenueTabState extends State<RevenueTab> {
     );
   }
 
-  Widget _buildMobileList(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  Widget _buildMobileList(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       itemCount: docs.length,
@@ -560,8 +594,8 @@ class _RevenueTabState extends State<RevenueTab> {
   }
 
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _applyFilters(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-      ) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     final filtered = docs.where((doc) {
       final d = doc.data();
 
@@ -570,6 +604,9 @@ class _RevenueTabState extends State<RevenueTab> {
 
       final searchBag = [
         d['customerName'],
+        d['leadUniqueId'],
+        d['uniqueLeadId'],
+        d['leadSerialNumber'],
         d['customerMobile'],
         d['policyName'],
         d['policyCode'],
@@ -580,8 +617,10 @@ class _RevenueTabState extends State<RevenueTab> {
       ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
 
       final matchesSearch = _search.isEmpty || searchBag.contains(_search);
-      final matchesCompany = _selectedCompany == 'All' || company == _selectedCompany;
-      final matchesStatus = _selectedStatus == 'All' || status == _selectedStatus;
+      final matchesCompany =
+          _selectedCompany == 'All' || company == _selectedCompany;
+      final matchesStatus =
+          _selectedStatus == 'All' || status == _selectedStatus;
 
       return matchesSearch && matchesCompany && matchesStatus;
     }).toList();
@@ -593,22 +632,24 @@ class _RevenueTabState extends State<RevenueTab> {
       int result;
       switch (_sortField) {
         case _RevenueSortField.company:
-          result = (da['companyName'] ?? '')
-              .toString()
-              .toLowerCase()
-              .compareTo((db['companyName'] ?? '').toString().toLowerCase());
+          result = (da['companyName'] ?? '').toString().toLowerCase().compareTo(
+            (db['companyName'] ?? '').toString().toLowerCase(),
+          );
           break;
         case _RevenueSortField.startDate:
-          result = _extractDate(da['policyStartDate'])
-              .compareTo(_extractDate(db['policyStartDate']));
+          result = _extractDate(
+            da['policyStartDate'],
+          ).compareTo(_extractDate(db['policyStartDate']));
           break;
         case _RevenueSortField.endDate:
-          result = _extractDate(da['policyEndDate'])
-              .compareTo(_extractDate(db['policyEndDate']));
+          result = _extractDate(
+            da['policyEndDate'],
+          ).compareTo(_extractDate(db['policyEndDate']));
           break;
         case _RevenueSortField.createdAt:
-          result =
-              _extractDate(da['createdAt']).compareTo(_extractDate(db['createdAt']));
+          result = _extractDate(
+            da['createdAt'],
+          ).compareTo(_extractDate(db['createdAt']));
           break;
         case _RevenueSortField.revenue:
           result = _toDouble(da['revenue']).compareTo(_toDouble(db['revenue']));
@@ -659,14 +700,14 @@ class _RevenueTabState extends State<RevenueTab> {
       value: value,
       items: items,
       onChanged: onChanged,
-      style: const TextStyle(
-        color: _textMain,
-        fontSize: 13,
-      ),
+      style: const TextStyle(color: _textMain, fontSize: 13),
       decoration: InputDecoration(
         filled: true,
         fillColor: _bg,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 11,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: _border),
@@ -684,13 +725,7 @@ class _RevenueTabState extends State<RevenueTab> {
   }
 }
 
-enum _RevenueSortField {
-  company,
-  startDate,
-  endDate,
-  createdAt,
-  revenue,
-}
+enum _RevenueSortField { company, startDate, endDate, createdAt, revenue }
 
 class _StatCardData {
   final String title;
@@ -782,10 +817,7 @@ class _TableHead extends StatelessWidget {
   final double width;
   final String label;
 
-  const _TableHead({
-    required this.width,
-    required this.label,
-  });
+  const _TableHead({required this.width, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -817,11 +849,15 @@ class _RevenueTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final customerName = (data['customerName'] ?? '-').toString();
+    final uniqueId = leadUniqueIdFromData(data);
     final companyName = (data['companyName'] ?? '-').toString();
     final policyName = (data['policyName'] ?? '-').toString();
+    final policyNumber = (data['policyNumber'] ?? '-').toString();
     final premium = _toDouble(data['premium']);
     final commissionPercent = _toDouble(data['commissionPercent']);
-    final commissionAmount = _toDouble(data['commissionAmount'] ?? data['commission']);
+    final commissionAmount = _toDouble(
+      data['commissionAmount'] ?? data['commission'],
+    );
     final revenue = _toDouble(data['revenue']);
     final startDate = _fmt(data['policyStartDate']);
     final endDate = _fmt(data['policyEndDate']);
@@ -839,8 +875,10 @@ class _RevenueTableRow extends StatelessWidget {
       child: Row(
         children: [
           _cell(140, customerName, bold: true),
+          _cell(120, uniqueId.isEmpty ? '-' : uniqueId, bold: true),
           _cell(130, companyName),
           _cell(150, policyName),
+          _cell(130, policyNumber, bold: true),
           _cell(100, _currency(premium)),
           _cell(100, '${commissionPercent.toStringAsFixed(0)}%'),
           _cell(120, _currency(commissionAmount)),
@@ -852,7 +890,10 @@ class _RevenueTableRow extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(20),
@@ -874,11 +915,11 @@ class _RevenueTableRow extends StatelessWidget {
   }
 
   Widget _cell(
-      double width,
-      String text, {
-        Color color = _textMain,
-        bool bold = false,
-      }) {
+    double width,
+    String text, {
+    Color color = _textMain,
+    bool bold = false,
+  }) {
     return SizedBox(
       width: width,
       child: Text(
@@ -947,7 +988,9 @@ class _RevenueMobileCard extends StatelessWidget {
     final policyNumber = (data['policyNumber'] ?? '-').toString();
     final premium = _toDouble(data['premium']);
     final commissionPercent = _toDouble(data['commissionPercent']);
-    final commissionAmount = _toDouble(data['commissionAmount'] ?? data['commission']);
+    final commissionAmount = _toDouble(
+      data['commissionAmount'] ?? data['commission'],
+    );
     final revenue = _toDouble(data['revenue']);
     final startDate = _fmt(data['policyStartDate']);
     final endDate = _fmt(data['policyEndDate']);
@@ -1012,17 +1055,20 @@ class _RevenueMobileCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             companyName,
-            style: const TextStyle(
-              color: _textMuted,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: _textMuted, fontSize: 12),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: _miniTile('Premium', _currency(premium))),
               const SizedBox(width: 10),
-              Expanded(child: _miniTile('Revenue', _currency(revenue), valueColor: _green)),
+              Expanded(
+                child: _miniTile(
+                  'Revenue',
+                  _currency(revenue),
+                  valueColor: _green,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -1050,11 +1096,11 @@ class _RevenueMobileCard extends StatelessWidget {
   }
 
   Widget _miniTile(
-      String label,
-      String value, {
-        bool muted = false,
-        Color? valueColor,
-      }) {
+    String label,
+    String value, {
+    bool muted = false,
+    Color? valueColor,
+  }) {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(

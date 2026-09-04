@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/audit_log_service.dart';
 import '../../utils/lead_workflow_rules.dart';
+import '../../utils/lead_serial_service.dart';
 
 const _pageBg = Color(0xFFF4F6F9);
 const _surface = Colors.white;
@@ -13,14 +14,21 @@ const _text = Color(0xFF0D1B2A);
 const _muted = Color(0xFF667085);
 const _green = Color(0xFF059669);
 const _red = Color(0xFFB42318);
-const _interests = ['Health', 'Life', 'General', 'ECGC', 'Agricultural'];
-const _outcomes = ['Interested', 'Not Interested'];
+const _interests = ['Health', 'Life', 'General', 'ECGC', 'Agriculture'];
+const _outcomes = ['Interested', 'Followup', 'Not Interested'];
 
 Widget _categoryFilters({
   required String selected,
   required ValueChanged<String> onSelected,
 }) {
-  const categories = ['All', 'Health', 'Life', 'ECGC', 'General'];
+  const categories = [
+    'All',
+    'Health',
+    'Life',
+    'Agriculture',
+    'ECGC',
+    'General',
+  ];
   return Wrap(
     spacing: 8,
     runSpacing: 8,
@@ -50,9 +58,57 @@ String? _customerCategoryForInterest(String value) {
       return 'ECGC';
     case 'agriculture':
     case 'agricultural':
-      return 'Agricultural';
+      return 'Agriculture';
   }
   return null;
+}
+
+String? _primaryLeadCategory(Iterable<String> values) {
+  final normalized = values
+      .map((value) => _customerCategoryForInterest(value))
+      .whereType<String>()
+      .toSet();
+  for (final category in _interests) {
+    if (normalized.contains(category)) return category;
+  }
+  return normalized.isEmpty ? null : normalized.first;
+}
+
+String _leadUniqueIdFromData(Map<String, dynamic> data) {
+  for (final key in ['leadUniqueId', 'uniqueLeadId', 'leadSerialNumber']) {
+    final value = data[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty) return value;
+  }
+  return '';
+}
+
+Map<String, dynamic> _leadUniqueIdFields(String value) {
+  if (value.trim().isEmpty) return const <String, dynamic>{};
+  return <String, dynamic>{
+    'leadUniqueId': value.trim(),
+    'uniqueLeadId': value.trim(),
+    'leadSerialNumber': value.trim(),
+  };
+}
+
+Future<Map<String, dynamic>> _ensureLeadUniqueIdFields({
+  required QueryDocumentSnapshot<Map<String, dynamic>> lead,
+  required Iterable<String> categories,
+  required FirebaseFirestore firestore,
+}) async {
+  final existing = _leadUniqueIdFromData(lead.data());
+  if (existing.isNotEmpty) return _leadUniqueIdFields(existing);
+
+  final primaryCategory = _primaryLeadCategory(categories);
+  if (primaryCategory == null) return const <String, dynamic>{};
+
+  final reservation = await LeadSerialService.reserve(
+    category: primaryCategory,
+    leadId: lead.id,
+    leadName: (lead.data()['name'] ?? 'Unnamed').toString(),
+    firestore: firestore,
+  );
+  return reservation.toFirestoreFields();
 }
 
 String _leadMobileKey(String value, String fallback) {
@@ -61,7 +117,7 @@ String _leadMobileKey(String value, String fallback) {
   return digits.length > 10 ? digits.substring(digits.length - 10) : digits;
 }
 
-({List<String> categories, List<String> customerIds})
+Future<({List<String> categories, List<String> customerIds})>
 _queueExecutiveCustomerStreams({
   required WriteBatch batch,
   required FirebaseFirestore firestore,
@@ -69,7 +125,7 @@ _queueExecutiveCustomerStreams({
   required QueryDocumentSnapshot<Map<String, dynamic>> executive,
   required String assignedById,
   required String assignedByName,
-}) {
+}) async {
   final leadData = lead.data();
   final executiveData = executive.data();
   final categories =
@@ -86,6 +142,14 @@ _queueExecutiveCustomerStreams({
   final executiveUid = (executiveData['uid'] ?? '').toString();
   final mobileKey = _leadMobileKey(mobile, lead.id);
   final customerIds = <String>[];
+  final leadUniqueIdFields = await _ensureLeadUniqueIdFields(
+    lead: lead,
+    categories: categories,
+    firestore: firestore,
+  );
+  if (leadUniqueIdFields.isNotEmpty) {
+    batch.update(lead.reference, leadUniqueIdFields);
+  }
 
   for (final category in categories) {
     final customerId = 'executive_lead_${mobileKey}_${category.toLowerCase()}';
@@ -104,6 +168,7 @@ _queueExecutiveCustomerStreams({
       'panNumber': (leadData['panNumber'] ?? '').toString(),
       'gender': (leadData['gender'] ?? '').toString(),
       'customerType': (leadData['customerType'] ?? 'Individual').toString(),
+      ...leadUniqueIdFields,
       'maritalStatus': (leadData['maritalStatus'] ?? '').toString(),
       'status': 'Active',
       'leadStatus': 'Green',
@@ -121,7 +186,9 @@ _queueExecutiveCustomerStreams({
       'assignedByTeamLeaderId': assignedById,
       'assignedByTeamLeaderName': assignedByName,
       'source': 'Executive Lead Assignment',
-      'searchKey': '${name.toLowerCase()} $mobile $email',
+      'searchKey':
+          '${name.toLowerCase()} $mobile $email ${leadUniqueIdFields['leadUniqueId'] ?? ''}'
+              .trim(),
       'createdAt':
           leadData['returnedAt'] ??
           leadData['createdAt'] ??
@@ -180,7 +247,8 @@ class TelecallerLeadsDashboard extends StatefulWidget {
 }
 
 class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
-  String _leadWorkFilter = 'Call';
+  static const int _dailyCallLimit = 2;
+  String _leadWorkFilter = 'Yet to called';
   DateTime _performanceMonth = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -200,6 +268,97 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
   bool _returned(Map<String, dynamic> data) =>
       (data['status'] ?? 'Assigned').toString().toLowerCase() == 'returned';
 
+  bool _isFollowup(Map<String, dynamic> data) {
+    final status = (data['status'] ?? '').toString().toLowerCase();
+    final outcome = (data['outcome'] ?? '').toString().toLowerCase();
+    return data['telecallerFollowup'] == true ||
+        status == 'followup' ||
+        outcome == 'followup';
+  }
+
+  bool _canUpdateAfterCall(Map<String, dynamic> data) =>
+      _returned(data) || _isFollowup(data) || _telecallerCallCount(data) > 0;
+
+  String _todayKey() {
+    final now = DateTime.now();
+    return '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+  }
+
+  int _telecallerCallCount(Map<String, dynamic> data) =>
+      (data['telecallerCallCount'] as num?)?.toInt() ?? 0;
+
+  int _telecallerNoteCount(Map<String, dynamic> data) =>
+      (data['telecallerNoteCount'] as num?)?.toInt() ??
+      (((data['telecallerNotesHistory'] as List?) ?? const []).length);
+
+  int _telecallerDailyCallCount(Map<String, dynamic> data, [String? dayKey]) {
+    final counts = data['telecallerDailyCallCounts'];
+    if (counts is! Map) return 0;
+    return (counts[dayKey ?? _todayKey()] as num?)?.toInt() ?? 0;
+  }
+
+  List<Map<String, dynamic>> _telecallerCallHistory(
+    Map<String, dynamic> data,
+  ) => ((data['telecallerCallHistory'] as List?) ?? const <dynamic>[])
+      .whereType<Map>()
+      .map((value) => Map<String, dynamic>.from(value))
+      .toList();
+
+  int _telecallerCallsInMonth(
+    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    DateTime month,
+  ) {
+    var count = 0;
+    for (final doc in docs) {
+      for (final call in _telecallerCallHistory(doc.data())) {
+        if (_inMonth(call['calledAt'], month)) count++;
+      }
+    }
+    return count;
+  }
+
+  Future<int?> _recordTelecallerCall(
+    QueryDocumentSnapshot<Map<String, dynamic>> document,
+  ) async {
+    final dayKey = _todayKey();
+    return FirebaseFirestore.instance.runTransaction<int?>((transaction) async {
+      final latest = await transaction.get(document.reference);
+      final latestData = latest.data() ?? <String, dynamic>{};
+      final dailyCount = _telecallerDailyCallCount(latestData, dayKey);
+      if (dailyCount >= _dailyCallLimit) return null;
+      final callNumber = _telecallerCallCount(latestData) + 1;
+      transaction.update(document.reference, {
+        'telecallerCallCount': callNumber,
+        'telecallerLastCalledAt': FieldValue.serverTimestamp(),
+        'telecallerDailyCallCounts.$dayKey': dailyCount + 1,
+        'telecallerCallHistory': FieldValue.arrayUnion([
+          {
+            'callNumber': callNumber,
+            'dailyCallNumber': dailyCount + 1,
+            'dayKey': dayKey,
+            'calledAt': Timestamp.now(),
+            'calledById': _employeeId,
+            'calledByName': (widget.userData['name'] ?? '').toString(),
+          },
+        ]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return callNumber;
+    });
+  }
+
+  void _showDailyCallLimitMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Should not call a lead more than 2 times a day.'),
+        backgroundColor: _red,
+      ),
+    );
+  }
+
   Future<void> _callLead(
     QueryDocumentSnapshot<Map<String, dynamic>> document,
   ) async {
@@ -209,6 +368,10 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
       '',
     );
     if (number.isEmpty) return;
+    if (_telecallerDailyCallCount(data) >= _dailyCallLimit) {
+      _showDailyCallLimitMessage();
+      return;
+    }
     final opened = await launchUrl(Uri(scheme: 'tel', path: number));
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -216,16 +379,28 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
       );
       return;
     }
+    final callNumber = await _recordTelecallerCall(document);
+    if (callNumber == null) {
+      _showDailyCallLimitMessage();
+      return;
+    }
     if (!mounted) return;
-    await _openResponse(document, fromCall: true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Call $callNumber recorded. Use Update to add result or follow-up.',
+        ),
+      ),
+    );
   }
 
   Future<void> _openResponse(
     QueryDocumentSnapshot<Map<String, dynamic>> document, {
     bool fromCall = false,
+    int? callNumber,
   }) async {
     final data = document.data();
-    if (!fromCall && !_returned(data)) {
+    if (!fromCall && !_canUpdateAfterCall(data)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Call the customer first, then enter call info.'),
@@ -264,29 +439,47 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
               error = null;
             });
             try {
-              final wasReturned = _returned(data);
+              final noteText = notes.text.trim();
+              final existingNote = (data['notes'] ?? '').toString().trim();
+              final shouldRecordNote =
+                  noteText.isNotEmpty && (fromCall || noteText != existingNote);
+              final isFollowup = outcome == 'Followup';
+              final leadUniqueIdFields = outcome == 'Interested'
+                  ? await _ensureLeadUniqueIdFields(
+                      lead: document,
+                      categories: selected,
+                      firestore: FirebaseFirestore.instance,
+                    )
+                  : const <String, dynamic>{};
               await document.reference.update({
-                'status': 'Returned',
+                'status': isFollowup ? 'Followup' : 'Returned',
                 'outcome': outcome,
                 'interestCategories': outcome == 'Interested'
                     ? (selected.toList()..sort())
                     : <String>[],
-                'notes': notes.text.trim(),
-                'returnedAt': FieldValue.serverTimestamp(),
-                'returnedByUid': FirebaseAuth.instance.currentUser?.uid ?? '',
-                'returnedByEmail':
-                    FirebaseAuth.instance.currentUser?.email ?? '',
-                if (fromCall && !wasReturned) ...{
-                  'telecallerCallCount': FieldValue.increment(1),
-                  'telecallerLastCalledAt': FieldValue.serverTimestamp(),
-                  'telecallerCallHistory': FieldValue.arrayUnion([
+                'telecallerFollowup': isFollowup,
+                if (isFollowup) 'followupAt': FieldValue.serverTimestamp(),
+                'notes': noteText,
+                if (!isFollowup) ...{
+                  'returnedAt': FieldValue.serverTimestamp(),
+                  'returnedByUid': FirebaseAuth.instance.currentUser?.uid ?? '',
+                  'returnedByEmail':
+                      FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+                ...leadUniqueIdFields,
+                if (shouldRecordNote) ...{
+                  'telecallerNoteCount': FieldValue.increment(1),
+                  'telecallerLastNoteAt': FieldValue.serverTimestamp(),
+                  'telecallerNotesHistory': FieldValue.arrayUnion([
                     {
-                      'calledAt': Timestamp.now(),
-                      'calledById': _employeeId,
-                      'calledByName': (widget.userData['name'] ?? '')
-                          .toString(),
-                      'note': notes.text.trim(),
+                      'noteNumber': _telecallerNoteCount(data) + 1,
+                      'callNumber': ?callNumber,
+                      'addedAt': Timestamp.now(),
+                      'addedById': _employeeId,
+                      'addedByName': (widget.userData['name'] ?? '').toString(),
+                      'note': noteText,
                       'outcome': outcome,
+                      'source': fromCall ? 'Call' : 'Update Result',
                     },
                   ]),
                 },
@@ -339,7 +532,7 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
                         if (value != null) {
                           setLocal(() {
                             outcome = value;
-                            if (outcome == 'Not Interested') selected.clear();
+                            if (outcome != 'Interested') selected.clear();
                           });
                         }
                       },
@@ -438,11 +631,10 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
                 (doc) => _inMonth(doc.data()['assignedAt'], _performanceMonth),
               )
               .length;
-          final callsTakenInMonth = all
-              .where(
-                (doc) => _inMonth(doc.data()['returnedAt'], _performanceMonth),
-              )
-              .length;
+          final callsTakenInMonth = _telecallerCallsInMonth(
+            all,
+            _performanceMonth,
+          );
           final interestedInMonth = all.where((doc) {
             final data = doc.data();
             return _inMonth(data['returnedAt'], _performanceMonth) &&
@@ -466,73 +658,87 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
 
           return DefaultTabController(
             length: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(24, 22, 24, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'My Telecaller Dashboard',
-                        style: TextStyle(
-                          color: _text,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 520;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        compact ? 12 : 24,
+                        compact ? 12 : 22,
+                        compact ? 12 : 24,
+                        compact ? 8 : 14,
                       ),
-                      SizedBox(height: 6),
-                      Text(
-                        'Call assigned contacts, record their interests and notes, then send the lead back.',
-                        style: TextStyle(color: _muted),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'My Telecaller Dashboard',
+                            style: TextStyle(
+                              color: _text,
+                              fontSize: compact ? 18 : 24,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          if (!compact) ...[
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Call assigned contacts, record their interests and notes, then send the lead back.',
+                              style: TextStyle(color: _muted),
+                            ),
+                          ],
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 24),
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: _surface,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _border),
-                  ),
-                  child: const TabBar(
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    dividerColor: Colors.transparent,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: _muted,
-                    indicator: BoxDecoration(
-                      color: Color(0xFF0D2D4F),
-                      borderRadius: BorderRadius.all(Radius.circular(9)),
                     ),
-                    tabs: [
-                      Tab(
-                        icon: Icon(Icons.phone_in_talk_outlined),
-                        text: 'Leads',
+                    Container(
+                      margin: EdgeInsets.symmetric(
+                        horizontal: compact ? 12 : 24,
                       ),
-                      Tab(
-                        icon: Icon(Icons.insights_rounded),
-                        text: 'Performance',
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: _surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _border),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      _leadsWorkspace(snapshot, latestLeads),
-                      _performancePanel(
-                        assignedInMonth: assignedInMonth,
-                        callsTakenInMonth: callsTakenInMonth,
-                        interestedInMonth: interestedInMonth,
+                      child: const TabBar(
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        dividerColor: Colors.transparent,
+                        labelColor: Colors.white,
+                        unselectedLabelColor: _muted,
+                        indicator: BoxDecoration(
+                          color: Color(0xFF0D2D4F),
+                          borderRadius: BorderRadius.all(Radius.circular(9)),
+                        ),
+                        tabs: [
+                          Tab(
+                            icon: Icon(Icons.phone_in_talk_outlined),
+                            text: 'Leads',
+                          ),
+                          Tab(
+                            icon: Icon(Icons.insights_rounded),
+                            text: 'Performance',
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-              ],
+                    ),
+                    SizedBox(height: compact ? 6 : 10),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          _leadsWorkspace(snapshot, latestLeads),
+                          _performancePanel(
+                            assignedInMonth: assignedInMonth,
+                            callsTakenInMonth: callsTakenInMonth,
+                            interestedInMonth: interestedInMonth,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           );
         },
@@ -545,26 +751,49 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
     List<QueryDocumentSnapshot<Map<String, dynamic>>> latestLeads,
   ) {
     final visibleLeads = latestLeads.where((document) {
-      final alreadyCalled = _returned(document.data());
-      return _leadWorkFilter == 'Already Called'
-          ? alreadyCalled
-          : !alreadyCalled;
+      final data = document.data();
+      final followup = _isFollowup(data);
+      final callCount = _telecallerCallCount(data);
+      return switch (_leadWorkFilter) {
+        'Already called' => !followup && callCount > 0,
+        'Followup' => followup,
+        _ => !followup && callCount == 0,
+      };
     }).toList();
-    final callCount = latestLeads
-        .where((document) => !_returned(document.data()))
+    final yetToCallCount = latestLeads
+        .where(
+          (document) =>
+              !_isFollowup(document.data()) &&
+              _telecallerCallCount(document.data()) == 0,
+        )
         .length;
-    final calledCount = latestLeads.length - callCount;
+    final alreadyCalledCount = latestLeads
+        .where(
+          (document) =>
+              !_isFollowup(document.data()) &&
+              _telecallerCallCount(document.data()) > 0,
+        )
+        .length;
+    final followupCount = latestLeads
+        .where((document) => _isFollowup(document.data()))
+        .length;
+    final compact = MediaQuery.sizeOf(context).width < 520;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 12 : 24,
+        compact ? 8 : 12,
+        compact ? 12 : 24,
+        compact ? 14 : 24,
+      ),
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
                 'Latest Received Leads',
                 style: TextStyle(
                   color: _text,
-                  fontSize: 18,
+                  fontSize: compact ? 15 : 18,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -575,33 +804,41 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: compact ? 8 : 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
             ChoiceChip(
-              label: Text('Call ($callCount)'),
-              selected: _leadWorkFilter == 'Call',
-              onSelected: (_) => setState(() => _leadWorkFilter = 'Call'),
+              label: Text('Yet to called ($yetToCallCount)'),
+              selected: _leadWorkFilter == 'Yet to called',
+              onSelected: (_) =>
+                  setState(() => _leadWorkFilter = 'Yet to called'),
             ),
             ChoiceChip(
-              label: Text('Already Called ($calledCount)'),
-              selected: _leadWorkFilter == 'Already Called',
+              label: Text('Already called ($alreadyCalledCount)'),
+              selected: _leadWorkFilter == 'Already called',
               onSelected: (_) =>
-                  setState(() => _leadWorkFilter = 'Already Called'),
+                  setState(() => _leadWorkFilter = 'Already called'),
+            ),
+            ChoiceChip(
+              label: Text('Followup ($followupCount)'),
+              selected: _leadWorkFilter == 'Followup',
+              onSelected: (_) => setState(() => _leadWorkFilter = 'Followup'),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: compact ? 8 : 12),
         if (snapshot.connectionState == ConnectionState.waiting)
           const Center(child: CircularProgressIndicator())
         else if (snapshot.hasError)
           _message('Could not load assigned data.', error: true)
         else if (visibleLeads.isEmpty)
           _message(
-            _leadWorkFilter == 'Call'
+            _leadWorkFilter == 'Yet to called'
                 ? 'No new leads are waiting for a call.'
+                : _leadWorkFilter == 'Followup'
+                ? 'No follow-up leads are waiting.'
                 : 'No leads have been called in this batch.',
           )
         else
@@ -615,45 +852,81 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
     required int callsTakenInMonth,
     required int interestedInMonth,
   }) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-      children: [
-        const Text(
-          'Monthly Leads Performance',
-          style: TextStyle(
-            color: _text,
-            fontSize: 18,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _monthSelector(),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _stream(),
+      builder: (context, snapshot) {
+        final all = snapshot.data?.docs ?? [];
+        final lifetimeCalls = all.fold<int>(
+          0,
+          (total, lead) => total + _telecallerCallCount(lead.data()),
+        );
+        final lifetimeLeads = all.length;
+        final lifetimeInterested = all
+            .where(
+              (lead) =>
+                  (lead.data()['outcome'] ?? '').toString().toLowerCase() ==
+                  'interested',
+            )
+            .length;
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
           children: [
-            _metric(
-              'Calls taken',
-              callsTakenInMonth,
-              Icons.phone_in_talk_rounded,
-              const Color(0xFF0891B2),
+            const Text(
+              'Monthly Leads Performance',
+              style: TextStyle(
+                color: _text,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
             ),
-            _metric(
-              'Interested leads',
-              interestedInMonth,
-              Icons.thumb_up_alt_outlined,
-              _green,
-            ),
-            _metric(
-              'Assigned leads',
-              assignedInMonth,
-              Icons.call_received_rounded,
-              const Color(0xFFD97706),
+            const SizedBox(height: 12),
+            _monthSelector(),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _metric(
+                  'Calls taken',
+                  callsTakenInMonth,
+                  Icons.phone_in_talk_rounded,
+                  const Color(0xFF0891B2),
+                ),
+                _metric(
+                  'Interested leads',
+                  interestedInMonth,
+                  Icons.thumb_up_alt_outlined,
+                  _green,
+                ),
+                _metric(
+                  'Assigned leads',
+                  assignedInMonth,
+                  Icons.call_received_rounded,
+                  const Color(0xFFD97706),
+                ),
+                _metric(
+                  'Lifetime calls',
+                  lifetimeCalls,
+                  Icons.history_rounded,
+                  const Color(0xFF7C3AED),
+                ),
+                _metric(
+                  'Lifetime leads',
+                  lifetimeLeads,
+                  Icons.all_inbox_rounded,
+                  const Color(0xFF0D2D4F),
+                ),
+                _metric(
+                  'Lifetime leads sent',
+                  lifetimeInterested,
+                  Icons.send_rounded,
+                  _green,
+                ),
+              ],
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -707,9 +980,10 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
   }
 
   Widget _metric(String label, int value, IconData icon, Color color) {
+    final compact = MediaQuery.sizeOf(context).width < 520;
     return Container(
-      width: 245,
-      padding: const EdgeInsets.all(18),
+      width: compact ? double.infinity : 245,
+      padding: EdgeInsets.all(compact ? 12 : 18),
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(14),
@@ -718,18 +992,19 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
       child: Row(
         children: [
           CircleAvatar(
+            radius: compact ? 18 : 20,
             backgroundColor: color.withValues(alpha: 0.1),
             foregroundColor: color,
-            child: Icon(icon),
+            child: Icon(icon, size: compact ? 18 : 22),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: compact ? 9 : 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 '$value',
-                style: const TextStyle(
-                  fontSize: 24,
+                style: TextStyle(
+                  fontSize: compact ? 20 : 24,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -744,9 +1019,142 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
   Widget _leadCard(QueryDocumentSnapshot<Map<String, dynamic>> document) {
     final data = document.data();
     final returned = _returned(data);
+    final followup = _isFollowup(data);
+    final leadUniqueId = _leadUniqueIdFromData(data);
+    final callsToday = _telecallerDailyCallCount(data);
+    final totalCalls = _telecallerCallCount(data);
+    final noteCount = _telecallerNoteCount(data);
+    final dailyLimitReached = callsToday >= _dailyCallLimit;
     final interests = ((data['interestCategories'] as List?) ?? const [])
         .map((value) => value.toString())
         .toList();
+    final compact = MediaQuery.sizeOf(context).width < 560;
+    final stateColor = returned
+        ? _green
+        : followup
+        ? const Color(0xFFD97706)
+        : const Color(0xFF0891B2);
+    final leading = CircleAvatar(
+      radius: compact ? 18 : 20,
+      backgroundColor: stateColor.withValues(alpha: 0.1),
+      child: Icon(
+        returned
+            ? Icons.check_rounded
+            : followup
+            ? Icons.event_repeat_rounded
+            : Icons.phone_in_talk_outlined,
+        color: stateColor,
+        size: compact ? 18 : 22,
+      ),
+    );
+    final detailColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          (data['name'] ?? 'Unnamed').toString(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: compact ? 14 : 16,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          (data['mobileNumber'] ?? '').toString(),
+          style: TextStyle(color: _muted, fontSize: compact ? 12 : 14),
+        ),
+        if (leadUniqueId.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            'Lead ID: $leadUniqueId',
+            style: TextStyle(
+              color: _text,
+              fontSize: compact ? 11 : 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 5,
+          children: [
+            _countChip(
+              'Today $callsToday/$_dailyCallLimit',
+              dailyLimitReached ? _red : const Color(0xFF0891B2),
+            ),
+            _countChip('Total $totalCalls', _green),
+            _countChip('Notes $noteCount', const Color(0xFF7C3AED)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          followup
+              ? 'Followup ${_dateLabel(data['followupAt'])}'
+              : returned
+              ? 'Returned ${_dateLabel(data['returnedAt'])} - ${(data['outcome'] ?? '').toString()}'
+              : 'Assigned ${_dateLabel(data['assignedAt'])}',
+          style: TextStyle(color: _muted, fontSize: compact ? 11 : 12),
+        ),
+        if (interests.isNotEmpty) ...[
+          const SizedBox(height: 7),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            children: interests
+                .map(
+                  (item) => Chip(
+                    label: Text(item, style: const TextStyle(fontSize: 11)),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+        if ((data['notes'] ?? '').toString().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            (data['notes'] ?? '').toString(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: compact ? 12 : 14),
+          ),
+        ],
+      ],
+    );
+    final actions = Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: [
+        OutlinedButton.icon(
+          onPressed: dailyLimitReached ? null : () => _callLead(document),
+          icon: const Icon(Icons.call_rounded, size: 17),
+          label: Text(
+            dailyLimitReached
+                ? 'Limit reached'
+                : returned
+                ? 'Call Again'
+                : 'Call',
+          ),
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+        ),
+        if (_canUpdateAfterCall(data))
+          ElevatedButton.icon(
+            onPressed: () => _openResponse(document),
+            icon: const Icon(Icons.edit_note_rounded, size: 17),
+            label: const Text('Update'),
+            style: ElevatedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
+          ),
+      ],
+    );
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
@@ -755,83 +1163,51 @@ class _TelecallerLeadsDashboardState extends State<TelecallerLeadsDashboard> {
         side: const BorderSide(color: _border),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              backgroundColor: returned
-                  ? _green.withValues(alpha: 0.1)
-                  : const Color(0xFF0891B2).withValues(alpha: 0.1),
-              child: Icon(
-                returned ? Icons.check_rounded : Icons.phone_in_talk_outlined,
-                color: returned ? _green : const Color(0xFF0891B2),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
+        padding: EdgeInsets.all(compact ? 11 : 16),
+        child: compact
+            ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    (data['name'] ?? 'Unnamed').toString(),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      leading,
+                      const SizedBox(width: 10),
+                      Expanded(child: detailColumn),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    (data['mobileNumber'] ?? '').toString(),
-                    style: const TextStyle(color: _muted),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    returned
-                        ? 'Returned ${_dateLabel(data['returnedAt'])} · ${(data['outcome'] ?? '').toString()}'
-                        : 'Assigned ${_dateLabel(data['assignedAt'])}',
-                    style: const TextStyle(color: _muted, fontSize: 12),
-                  ),
-                  if (interests.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      children: interests
-                          .map(
-                            (item) => Chip(
-                              label: Text(item),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                  if ((data['notes'] ?? '').toString().isNotEmpty) ...[
-                    const SizedBox(height: 7),
-                    Text((data['notes'] ?? '').toString()),
-                  ],
+                  const SizedBox(height: 10),
+                  actions,
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  leading,
+                  const SizedBox(width: 14),
+                  Expanded(child: detailColumn),
+                  const SizedBox(width: 10),
+                  SizedBox(width: 170, child: actions),
                 ],
               ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: returned ? null : () => _callLead(document),
-                  icon: const Icon(Icons.call_rounded),
-                  label: Text(returned ? 'Already Called' : 'Call'),
-                ),
-                const SizedBox(height: 8),
-                if (returned)
-                  ElevatedButton.icon(
-                    onPressed: () => _openResponse(document),
-                    icon: const Icon(Icons.edit_note_rounded),
-                    label: const Text('Update Result'),
-                  ),
-              ],
-            ),
-          ],
+      ),
+    );
+  }
+
+  Widget _countChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
         ),
       ),
     );
@@ -1306,6 +1682,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
     final data = document.data();
     final status = _status(data);
     final escalated = data['executiveEscalatedToTeamLeader'] == true;
+    final leadUniqueId = _leadUniqueIdFromData(data);
     final interests = ((data['interestCategories'] as List?) ?? const []).join(
       ', ',
     );
@@ -1333,6 +1710,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
                     ),
                     const SizedBox(height: 5),
                     Text((data['mobileNumber'] ?? '').toString()),
+                    if (leadUniqueId.isNotEmpty) Text('Lead ID: $leadUniqueId'),
                     if (interests.isNotEmpty) Text('Interest: $interests'),
                     if (escalated && !_isTeamLeader)
                       const Padding(
@@ -1384,6 +1762,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
     final executiveNotes = _executiveNotes(data);
     final noteCount = executiveNotes.length;
     final escalated = data['executiveEscalatedToTeamLeader'] == true;
+    final leadUniqueId = _leadUniqueIdFromData(data);
     final interests = ((data['interestCategories'] as List?) ?? const []).join(
       ', ',
     );
@@ -1434,6 +1813,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text((data['mobileNumber'] ?? '').toString()),
+                if (leadUniqueId.isNotEmpty) Text('Lead ID: $leadUniqueId'),
                 if (interests.isNotEmpty) Text('Interest: $interests'),
                 Text('Notes: ${(data['notes'] ?? '').toString()}'),
                 if (data['customerPurchaseValue'] != null)
@@ -1585,12 +1965,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
             .where('${_prefix}AssignedToId', isEqualTo: _employeeId)
             .snapshots(),
         builder: (context, snapshot) {
-          final documents = (snapshot.data?.docs.toList() ?? []).where((
-            document,
-          ) {
-            if (!_isTeamLeader) return true;
-            return document.data()['executiveEscalatedToTeamLeader'] == true;
-          }).toList();
+          final documents = snapshot.data?.docs.toList() ?? [];
           if (_selectedLeadId != null) {
             final matches = documents
                 .where((document) => document.id == _selectedLeadId)
@@ -1611,7 +1986,7 @@ class _ForwardedLeadsDashboardState extends State<ForwardedLeadsDashboard> {
               const SizedBox(height: 6),
               Text(
                 _isTeamLeader
-                    ? '${documents.length} Green lead(s) escalated by your executives'
+                    ? '${documents.length} lead(s) assigned to you and your team'
                     : '${documents.length} lead(s) assigned to you',
                 style: const TextStyle(color: _muted),
               ),
@@ -1681,7 +2056,7 @@ class _TeamLeaderDataTransferDashboardState
           final executive =
               selectedExecutives[index % selectedExecutives.length];
           final executiveData = executive.data();
-          final streamResult = _queueExecutiveCustomerStreams(
+          final streamResult = await _queueExecutiveCustomerStreams(
             batch: batch,
             firestore: firestore,
             lead: lead,
@@ -1998,6 +2373,7 @@ class _ReturnedLeadDistributionSectionState
     extends State<ReturnedLeadDistributionSection> {
   final Set<String> _selectedLeadIds = {};
   final Set<String> _selectedRecipientIds = {};
+  final Set<String> _ensuringLeadIds = {};
   bool _sending = false;
   String _categoryFilter = 'All';
   String _directoryFilter = 'All Directories';
@@ -2011,12 +2387,73 @@ class _ReturnedLeadDistributionSectionState
     return (data['status'] ?? 'Active').toString().toLowerCase() != 'inactive';
   }
 
+  bool _isAssignedToTarget(Map<String, dynamic> data) =>
+      data['${_prefix}Forwarded'] == true ||
+      (data['${_prefix}AssignedToId'] ?? '').toString().trim().isNotEmpty;
+
+  String _targetAssignedName(Map<String, dynamic> data) {
+    final name = (data['${_prefix}AssignedToName'] ?? '').toString().trim();
+    if (name.isNotEmpty) return name;
+    final email = (data['${_prefix}AssignedToEmail'] ?? '').toString().trim();
+    return email.isNotEmpty ? email : '-';
+  }
+
+  String _assignmentStatus(Map<String, dynamic> data) =>
+      _isAssignedToTarget(data) ? 'Assigned' : 'Not Assigned';
+
+  void _ensureLeadIdsForVisibleRows(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> leads,
+  ) {
+    final missing = leads.where((lead) {
+      final data = lead.data();
+      return _leadUniqueIdFromData(data).isEmpty &&
+          _primaryLeadCategory(
+                ((data['interestCategories'] as List?) ?? const []).map(
+                  (value) => value.toString(),
+                ),
+              ) !=
+              null &&
+          !_ensuringLeadIds.contains(lead.id);
+    }).toList();
+    if (missing.isEmpty) return;
+
+    for (final lead in missing) {
+      _ensuringLeadIds.add(lead.id);
+    }
+    Future.microtask(() async {
+      final firestore = FirebaseFirestore.instance;
+      for (final lead in missing) {
+        try {
+          final fields = await _ensureLeadUniqueIdFields(
+            lead: lead,
+            categories:
+                ((lead.data()['interestCategories'] as List?) ?? const []).map(
+                  (value) => value.toString(),
+                ),
+            firestore: firestore,
+          );
+          if (fields.isNotEmpty) {
+            await lead.reference.update(fields);
+          }
+        } catch (error) {
+          debugPrint('Could not create lead unique ID for ${lead.id}: $error');
+        } finally {
+          _ensuringLeadIds.remove(lead.id);
+        }
+      }
+    });
+  }
+
   Future<void> _send(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> leads,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> recipients,
   ) async {
     final selectedLeads = leads
-        .where((doc) => _selectedLeadIds.contains(doc.id))
+        .where(
+          (doc) =>
+              _selectedLeadIds.contains(doc.id) &&
+              !_isAssignedToTarget(doc.data()),
+        )
         .toList();
     final selectedRecipients = recipients
         .where((doc) => _selectedRecipientIds.contains(doc.id))
@@ -2035,7 +2472,7 @@ class _ReturnedLeadDistributionSectionState
               selectedRecipients[index % selectedRecipients.length];
           final data = recipient.data();
           final streamResult = widget.targetRole == 'executive'
-              ? _queueExecutiveCustomerStreams(
+              ? await _queueExecutiveCustomerStreams(
                   batch: batch,
                   firestore: firestore,
                   lead: lead,
@@ -2052,6 +2489,13 @@ class _ReturnedLeadDistributionSectionState
             '${_prefix}AssignedToName': (data['name'] ?? '').toString(),
             '${_prefix}AssignedToEmail': (data['email'] ?? '').toString(),
             '${_prefix}AssignedAt': FieldValue.serverTimestamp(),
+            '${_prefix}AssignmentStatus': 'Assigned',
+            'lastAssignedRole': widget.targetRole,
+            'lastAssignedRoleLabel': widget.targetLabel,
+            'lastAssignedToId': recipient.id,
+            'lastAssignedToName': (data['name'] ?? '').toString(),
+            'lastAssignedToEmail': (data['email'] ?? '').toString(),
+            'lastAssignedAt': FieldValue.serverTimestamp(),
             if (streamResult != null) ...{
               'executiveLeadStatus': 'Green',
               'leadStatus': 'Green',
@@ -2122,8 +2566,7 @@ class _ReturnedLeadDistributionSectionState
                   (data['status'] ?? '').toString().toLowerCase() ==
                       'returned' &&
                   (data['outcome'] ?? '').toString().toLowerCase() ==
-                      'interested' &&
-                  data['${_prefix}Forwarded'] != true;
+                      'interested';
               if (!waiting || _categoryFilter == 'All') return waiting;
               final categories =
                   ((data['interestCategories'] as List?) ?? const []).map(
@@ -2146,21 +2589,36 @@ class _ReturnedLeadDistributionSectionState
                   final query = _searchQuery.trim().toLowerCase();
                   return [
                     data['sNo'],
+                    data['leadUniqueId'],
+                    data['uniqueLeadId'],
+                    data['leadSerialNumber'],
                     data['name'],
                     data['mobileNumber'],
                     data['city'],
                     data['notes'],
                     data['assignedToName'],
+                    data['${_prefix}AssignedToName'],
+                    data['${_prefix}AssignedToEmail'],
+                    data['${_prefix}AssignmentStatus'],
+                    data['lastAssignedToName'],
+                    data['lastAssignedToEmail'],
+                    _assignmentStatus(data),
                     ...((data['interestCategories'] as List?) ?? const []),
                   ].any(
                     (value) => value.toString().toLowerCase().contains(query),
                   );
-                }).toList()..sort(
-                  (a, b) => (_date(b.data()['returnedAt']) ?? DateTime(1970))
+                }).toList()..sort((a, b) {
+                  final aAssigned = _isAssignedToTarget(a.data()) ? 1 : 0;
+                  final bAssigned = _isAssignedToTarget(b.data()) ? 1 : 0;
+                  if (aAssigned != bAssigned) {
+                    return aAssigned.compareTo(bAssigned);
+                  }
+                  return (_date(b.data()['returnedAt']) ?? DateTime(1970))
                       .compareTo(
                         _date(a.data()['returnedAt']) ?? DateTime(1970),
-                      ),
-                );
+                      );
+                });
+            _ensureLeadIdsForVisibleRows(leads);
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('agents')
@@ -2204,9 +2662,12 @@ class _ReturnedLeadDistributionSectionState
     selectedRecipients,
     required bool loading,
   }) {
+    final selectableLeads = leads
+        .where((lead) => !_isAssignedToTarget(lead.data()))
+        .toList();
     final allVisibleSelected =
-        leads.isNotEmpty &&
-        leads.every((lead) => _selectedLeadIds.contains(lead.id));
+        selectableLeads.isNotEmpty &&
+        selectableLeads.every((lead) => _selectedLeadIds.contains(lead.id));
     final allRecipientsSelected =
         recipients.isNotEmpty &&
         recipients.every((agent) => _selectedRecipientIds.contains(agent.id));
@@ -2295,7 +2756,7 @@ class _ReturnedLeadDistributionSectionState
                                 ),
                               ),
                             ),
-                            _countBadge('${leads.length} records'),
+                            _countBadge('${leads.length} leads'),
                           ],
                         ),
                       ),
@@ -2346,11 +2807,11 @@ class _ReturnedLeadDistributionSectionState
                         onSelected: (value) => setState(() {
                           if (value == true) {
                             _selectedLeadIds.addAll(
-                              leads.map((lead) => lead.id),
+                              selectableLeads.map((lead) => lead.id),
                             );
                           } else {
                             _selectedLeadIds.removeAll(
-                              leads.map((lead) => lead.id),
+                              selectableLeads.map((lead) => lead.id),
                             );
                           }
                         }),
@@ -2551,11 +3012,14 @@ class _ReturnedLeadDistributionSectionState
           ),
         ),
         _excelCell('S.No', 1, header: true),
+        _excelCell('Lead ID', 2, header: true),
         _excelCell('Name', 3, header: true),
         _excelCell('Phone', 2, header: true),
         _excelCell('City', 2, header: true),
         _excelCell('Category', 2, header: true),
         _excelCell('Telecaller', 2, header: true),
+        _excelCell('Status', 2, header: true),
+        _excelCell(widget.targetLabel, 2, header: true),
         _excelCell('Notes', 3, header: true),
         _excelCell('Returned', 2, header: true),
       ],
@@ -2568,15 +3032,24 @@ class _ReturnedLeadDistributionSectionState
   ) {
     final data = lead.data();
     final selected = _selectedLeadIds.contains(lead.id);
-    return InkWell(
-      onTap: () => setState(
+    final assigned = _isAssignedToTarget(data);
+    final leadUniqueId = _leadUniqueIdFromData(data);
+    void toggleSelection() {
+      if (assigned) return;
+      setState(
         () => selected
             ? _selectedLeadIds.remove(lead.id)
             : _selectedLeadIds.add(lead.id),
-      ),
+      );
+    }
+
+    return InkWell(
+      onTap: toggleSelection,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        color: selected
+        color: assigned
+            ? const Color(0xFFF1F5F9)
+            : selected
             ? const Color(0xFFEAF3FC)
             : index.isEven
             ? Colors.white
@@ -2587,14 +3060,11 @@ class _ReturnedLeadDistributionSectionState
               width: 34,
               child: Checkbox(
                 value: selected,
-                onChanged: (_) => setState(
-                  () => selected
-                      ? _selectedLeadIds.remove(lead.id)
-                      : _selectedLeadIds.add(lead.id),
-                ),
+                onChanged: assigned ? null : (_) => toggleSelection(),
               ),
             ),
-            _excelCell((data['sNo'] ?? index + 1).toString(), 1),
+            _excelCell('${index + 1}', 1),
+            _excelCell(leadUniqueId, 2),
             _excelCell((data['name'] ?? '').toString(), 3),
             _excelCell((data['mobileNumber'] ?? '').toString(), 2),
             _excelCell((data['city'] ?? '').toString(), 2),
@@ -2603,6 +3073,8 @@ class _ReturnedLeadDistributionSectionState
               2,
             ),
             _excelCell((data['assignedToName'] ?? '').toString(), 2),
+            _excelCell(_assignmentStatus(data), 2),
+            _excelCell(_targetAssignedName(data), 2),
             _excelCell((data['notes'] ?? '').toString(), 3),
             _excelCell(_dateLabel(data['returnedAt']), 2),
           ],

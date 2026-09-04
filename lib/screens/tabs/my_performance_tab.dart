@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class MyPerformanceTab extends StatefulWidget {
@@ -90,10 +90,19 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
 
   bool _matchesCategory(Map<String, dynamic> data) {
     if (_category == 'All') return true;
-    return (data['category'] ?? data['customerCategory'] ?? '')
-            .toString()
-            .toLowerCase() ==
-        _category.toLowerCase();
+    return _categoryOf(data).toLowerCase() == _category.toLowerCase();
+  }
+
+  String _categoryOf(Map<String, dynamic> data) {
+    final raw = (data['category'] ?? data['customerCategory'] ?? 'Health')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (raw.contains('agri') || raw == 'aic') return 'Agriculture';
+    if (raw.contains('ecgc') || raw.contains('export')) return 'ECGC';
+    if (raw == 'life') return 'Life';
+    if (raw == 'general' || raw == 'gen') return 'General';
+    return 'Health';
   }
 
   String _monthLabel(DateTime month) {
@@ -153,6 +162,8 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
     required int healthCustomers,
     required int lifeCustomers,
     required int generalCustomers,
+    required int agricultureCustomers,
+    required int ecgcCustomers,
     required double premium,
     required double targetPremium,
     required double targetProgress,
@@ -212,6 +223,8 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
           'healthCustomers': healthCustomers,
           'lifeCustomers': lifeCustomers,
           'generalCustomers': generalCustomers,
+          'agricultureCustomers': agricultureCustomers,
+          'ecgcCustomers': ecgcCustomers,
           'premium': premium,
           'targetPremium': targetPremium,
           'targetProgress': targetProgress,
@@ -330,31 +343,19 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
             }).toList();
 
             final healthCustomers = monthCustomers
-                .where(
-                  (doc) =>
-                      (doc.data()['customerCategory'] ?? 'Health')
-                          .toString()
-                          .toLowerCase() ==
-                      'health',
-                )
+                .where((doc) => _categoryOf(doc.data()) == 'Health')
                 .length;
             final lifeCustomers = monthCustomers
-                .where(
-                  (doc) =>
-                      (doc.data()['customerCategory'] ?? '')
-                          .toString()
-                          .toLowerCase() ==
-                      'life',
-                )
+                .where((doc) => _categoryOf(doc.data()) == 'Life')
                 .length;
             final generalCustomers = monthCustomers
-                .where(
-                  (doc) =>
-                      (doc.data()['customerCategory'] ?? '')
-                          .toString()
-                          .toLowerCase() ==
-                      'general',
-                )
+                .where((doc) => _categoryOf(doc.data()) == 'General')
+                .length;
+            final agricultureCustomers = monthCustomers
+                .where((doc) => _categoryOf(doc.data()) == 'Agriculture')
+                .length;
+            final ecgcCustomers = monthCustomers
+                .where((doc) => _categoryOf(doc.data()) == 'ECGC')
                 .length;
             final premium = policies.fold<double>(
               0,
@@ -452,7 +453,14 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             _employeeSelector(),
-                            ...['All', 'Health', 'Life', 'General'].map((cat) {
+                            ...[
+                              'All',
+                              'Health',
+                              'Life',
+                              'General',
+                              'Agriculture',
+                              'ECGC',
+                            ].map((cat) {
                               final selected = _category == cat;
                               return ChoiceChip(
                                 label: Text(cat),
@@ -472,6 +480,9 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
                                         healthCustomers: healthCustomers,
                                         lifeCustomers: lifeCustomers,
                                         generalCustomers: generalCustomers,
+                                        agricultureCustomers:
+                                            agricultureCustomers,
+                                        ecgcCustomers: ecgcCustomers,
                                         premium: premium,
                                         targetPremium: targetPremium,
                                         targetProgress: targetProgress,
@@ -558,6 +569,8 @@ class _MyPerformanceTabState extends State<MyPerformanceTab> {
                               health: healthCustomers,
                               life: lifeCustomers,
                               general: generalCustomers,
+                              agriculture: agricultureCustomers,
+                              ecgc: ecgcCustomers,
                             ),
                             const SizedBox(height: 14),
                             _PolicyListCard(policies: policies),
@@ -636,10 +649,14 @@ class _BreakdownCard extends StatelessWidget {
   final int health;
   final int life;
   final int general;
+  final int agriculture;
+  final int ecgc;
   const _BreakdownCard({
     required this.health,
     required this.life,
     required this.general,
+    required this.agriculture,
+    required this.ecgc,
   });
 
   @override
@@ -665,6 +682,8 @@ class _BreakdownCard extends StatelessWidget {
           _row('Health', health),
           _row('Life', life),
           _row('General', general),
+          _row('Agriculture', agriculture),
+          _row('ECGC', ecgc),
         ],
       ),
     );

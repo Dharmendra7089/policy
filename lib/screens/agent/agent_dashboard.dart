@@ -240,22 +240,24 @@ class _AgentDashboardState extends State<AgentDashboard> {
   }
 
   Widget _buildTopBar(String name) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 430;
     return Container(
       color: _surface,
       padding: EdgeInsets.fromLTRB(
-        20,
-        MediaQuery.of(context).padding.top + 12,
-        20,
-        12,
+        compact ? 12 : 20,
+        MediaQuery.of(context).padding.top + (compact ? 7 : 12),
+        compact ? 8 : 20,
+        compact ? 7 : 12,
       ),
       child: Row(
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: compact ? 28 : 32,
+            height: compact ? 28 : 32,
             decoration: BoxDecoration(
               color: _primary,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(7),
             ),
             child: const Center(
               child: Text(
@@ -268,32 +270,38 @@ class _AgentDashboardState extends State<AgentDashboard> {
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: compact ? 8 : 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Makk Finsol',
                 style: TextStyle(
                   color: _textMain,
-                  fontSize: 14,
+                  fontSize: compact ? 12 : 14,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const Text(
-                'Employee Portal',
-                style: TextStyle(color: _textMuted, fontSize: 11),
-              ),
+              if (!compact)
+                const Text(
+                  'Employee Portal',
+                  style: TextStyle(color: _textMuted, fontSize: 11),
+                ),
             ],
           ),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            constraints: BoxConstraints(maxWidth: compact ? 108 : 180),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 7 : 10,
+              vertical: compact ? 4 : 5,
+            ),
             decoration: BoxDecoration(
               color: _primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(
                   Icons.support_agent_rounded,
@@ -301,19 +309,27 @@ class _AgentDashboardState extends State<AgentDashboard> {
                   color: _primary,
                 ),
                 const SizedBox(width: 5),
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: _primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                Flexible(
+                  child: Text(
+                    name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: compact ? 2 : 8),
           IconButton(
+            constraints: BoxConstraints.tightFor(
+              width: compact ? 34 : 40,
+              height: compact ? 34 : 40,
+            ),
+            padding: EdgeInsets.zero,
             icon: const Icon(
               Icons.logout_rounded,
               color: Color(0xFFDC2626),
@@ -341,7 +357,7 @@ class _AgentDashboardState extends State<AgentDashboard> {
             child: GestureDetector(
               onTap: () => setState(() => _selectedIndex = i),
               child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -353,8 +369,10 @@ class _AgentDashboardState extends State<AgentDashboard> {
                     const SizedBox(height: 3),
                     Text(
                       item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 9,
                         color: isSelected ? _primary : _textMuted,
                         fontWeight: isSelected
                             ? FontWeight.w700

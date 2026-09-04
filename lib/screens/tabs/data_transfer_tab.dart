@@ -9,7 +9,7 @@ import '../../utils/spreadsheet_picker.dart';
 import '../../utils/spreadsheet_reader.dart';
 import 'telecaller_leads_tab.dart';
 
-enum DataTransferPage { importData, assignData }
+enum DataTransferPage { importData, assignData, transferLeads }
 
 class DataTransferTab extends StatelessWidget {
   final Map<String, dynamic> userData;
@@ -38,16 +38,25 @@ class DataTransferTab extends StatelessWidget {
       return ForwardedLeadsDashboard(userData: userData, role: 'executive');
     }
 
+    if (page == DataTransferPage.transferLeads) {
+      return const Scaffold(
+        backgroundColor: _background,
+        body: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: _EmployeeLeadTransferSection(),
+          ),
+        ),
+      );
+    }
+
     if (page == DataTransferPage.assignData) {
       return const Scaffold(
         backgroundColor: _background,
         body: SafeArea(
           child: Padding(
             padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: ReturnedLeadDistributionSection(
-              targetRole: 'team_leader',
-              targetLabel: 'Team Leader',
-            ),
+            child: _AssignDataSection(),
           ),
         ),
       );
@@ -71,6 +80,554 @@ class _TelecallerDistributionSection extends StatefulWidget {
   @override
   State<_TelecallerDistributionSection> createState() =>
       _TelecallerDistributionSectionState();
+}
+
+class _AssignDataSection extends StatelessWidget {
+  const _AssignDataSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Container(
+        decoration: BoxDecoration(
+          color: DataTransferTab._surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: DataTransferTab._border),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                border: Border(
+                  bottom: BorderSide(color: DataTransferTab._border),
+                ),
+              ),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.swap_horiz_rounded,
+                    color: DataTransferTab._primary,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Leads and send data to the team',
+                      style: TextStyle(
+                        color: DataTransferTab._text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 430,
+                    child: TabBar(
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      labelColor: Colors.white,
+                      unselectedLabelColor: DataTransferTab._muted,
+                      indicator: BoxDecoration(
+                        color: DataTransferTab._primary,
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                      ),
+                      tabs: [
+                        Tab(text: 'Send returned leads'),
+                        Tab(text: 'Transfer the leads employee to employee'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Expanded(
+              child: TabBarView(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.all(12),
+                    child: ReturnedLeadDistributionSection(
+                      targetRole: 'team_leader',
+                      targetLabel: 'Team Leader',
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(12),
+                    child: _EmployeeLeadTransferSection(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmployeeLeadTransferSection extends StatefulWidget {
+  const _EmployeeLeadTransferSection();
+
+  @override
+  State<_EmployeeLeadTransferSection> createState() =>
+      _EmployeeLeadTransferSectionState();
+}
+
+class _EmployeeLeadTransferSectionState
+    extends State<_EmployeeLeadTransferSection> {
+  final Set<String> _selectedLeadIds = {};
+  String? _sourceEmployeeId;
+  String? _targetEmployeeId;
+  String _search = '';
+  bool _transferring = false;
+
+  bool _isActive(Map<String, dynamic> data) {
+    if (data['is_active'] == false) return false;
+    final status = (data['status'] ?? 'Active').toString().toLowerCase();
+    return status != 'inactive' && status != 'disabled';
+  }
+
+  String _employeeName(Map<String, dynamic> data) =>
+      (data['name'] ?? data['email'] ?? 'Employee').toString();
+
+  String _employeeRole(Map<String, dynamic> data) =>
+      (data['roleLabel'] ?? data['role'] ?? '').toString();
+
+  bool _ownedBy(Map<String, dynamic> data, String employeeId) =>
+      (data['assignedToId'] ?? '').toString() == employeeId ||
+      (data['teamLeaderAssignedToId'] ?? '').toString() == employeeId ||
+      (data['executiveAssignedToId'] ?? '').toString() == employeeId;
+
+  String _ownerStage(Map<String, dynamic> data, String employeeId) {
+    if ((data['assignedToId'] ?? '').toString() == employeeId) {
+      return 'Telecaller';
+    }
+    if ((data['teamLeaderAssignedToId'] ?? '').toString() == employeeId) {
+      return 'Team Leader';
+    }
+    if ((data['executiveAssignedToId'] ?? '').toString() == employeeId) {
+      return 'Executive';
+    }
+    return 'Assigned';
+  }
+
+  String _leadId(Map<String, dynamic> data) {
+    for (final key in const [
+      'leadUniqueId',
+      'uniqueLeadId',
+      'leadSerialNumber',
+      'makkLeadId',
+    ]) {
+      final value = (data[key] ?? '').toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return '-';
+  }
+
+  String _leadName(Map<String, dynamic> data) =>
+      (data['name'] ?? data['fullName'] ?? data['customerName'] ?? '-')
+          .toString();
+
+  String _leadPhone(Map<String, dynamic> data) =>
+      (data['mobileNumber'] ?? data['phone'] ?? data['customerMobile'] ?? '-')
+          .toString();
+
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _filterLeads(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> leads,
+  ) {
+    final sourceId = _sourceEmployeeId;
+    if (sourceId == null || sourceId.isEmpty) return [];
+    final q = _search.trim().toLowerCase();
+    final rows = leads.where((lead) {
+      final data = lead.data();
+      if (!_ownedBy(data, sourceId)) return false;
+      if (q.isEmpty) return true;
+      final haystack = [
+        _leadId(data),
+        _leadName(data),
+        _leadPhone(data),
+        data['city'],
+        data['category'],
+        data['outcome'],
+        data['leadStatus'],
+        data['directoryName'],
+      ].map((value) => (value ?? '').toString().toLowerCase()).join(' ');
+      return haystack.contains(q);
+    }).toList();
+    rows.sort((a, b) {
+      final aDate = a.data()['assignedAt'];
+      final bDate = b.data()['assignedAt'];
+      final aMs = aDate is Timestamp ? aDate.millisecondsSinceEpoch : 0;
+      final bMs = bDate is Timestamp ? bDate.millisecondsSinceEpoch : 0;
+      return bMs.compareTo(aMs);
+    });
+    return rows;
+  }
+
+  QueryDocumentSnapshot<Map<String, dynamic>>? _employeeById(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> employees,
+    String? id,
+  ) {
+    if (id == null || id.isEmpty) return null;
+    for (final employee in employees) {
+      if (employee.id == id) return employee;
+    }
+    return null;
+  }
+
+  Future<void> _transfer(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> leads,
+    QueryDocumentSnapshot<Map<String, dynamic>> target,
+  ) async {
+    final sourceId = _sourceEmployeeId;
+    if (sourceId == null || sourceId.isEmpty || _selectedLeadIds.isEmpty) {
+      return;
+    }
+    final selected = leads
+        .where((lead) => _selectedLeadIds.contains(lead.id))
+        .toList();
+    if (selected.isEmpty) return;
+
+    setState(() => _transferring = true);
+    try {
+      final targetData = target.data();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final lead in selected) {
+        final data = lead.data();
+        final update = <String, dynamic>{
+          'transferredAt': FieldValue.serverTimestamp(),
+          'transferredFromId': sourceId,
+          'transferredToId': target.id,
+          'transferredToName': _employeeName(targetData),
+        };
+        if ((data['assignedToId'] ?? '').toString() == sourceId) {
+          update.addAll({
+            'assignedToId': target.id,
+            'assignedToUid': (targetData['uid'] ?? '').toString(),
+            'assignedToName': _employeeName(targetData),
+            'assignedToEmail': (targetData['email'] ?? '').toString(),
+            'assignedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        if ((data['teamLeaderAssignedToId'] ?? '').toString() == sourceId) {
+          update.addAll({
+            'teamLeaderAssignedToId': target.id,
+            'teamLeaderAssignedToUid': (targetData['uid'] ?? '').toString(),
+            'teamLeaderAssignedToName': _employeeName(targetData),
+            'teamLeaderAssignedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        if ((data['executiveAssignedToId'] ?? '').toString() == sourceId) {
+          update.addAll({
+            'executiveAssignedToId': target.id,
+            'executiveAssignedToUid': (targetData['uid'] ?? '').toString(),
+            'executiveAssignedToName': _employeeName(targetData),
+            'executiveAssignedAt': FieldValue.serverTimestamp(),
+          });
+        }
+        batch.update(lead.reference, update);
+      }
+      await batch.commit();
+      await AuditLogService.write(
+        page: 'Data Transfer',
+        action: 'Transferred Leads',
+        description:
+            'Transferred ${selected.length} lead(s) to ${_employeeName(targetData)}.',
+        targetId: target.id,
+        targetType: 'Employee',
+        targetName: _employeeName(targetData),
+      );
+      if (!mounted) return;
+      setState(() => _selectedLeadIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${selected.length} lead(s) transferred.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not transfer leads: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('agents').snapshots(),
+      builder: (context, employeeSnapshot) {
+        final employees =
+            (employeeSnapshot.data?.docs ?? [])
+                .where((doc) => _isActive(doc.data()))
+                .where(
+                  (doc) => (doc.data()['role'] ?? '').toString() != 'admin',
+                )
+                .toList()
+              ..sort(
+                (a, b) => _employeeName(a.data()).toLowerCase().compareTo(
+                  _employeeName(b.data()).toLowerCase(),
+                ),
+              );
+        final source = _employeeById(employees, _sourceEmployeeId);
+        final target = _employeeById(employees, _targetEmployeeId);
+
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('telecaller_leads')
+              .snapshots(),
+          builder: (context, leadSnapshot) {
+            final leads = _filterLeads(leadSnapshot.data?.docs ?? []);
+            _selectedLeadIds.removeWhere(
+              (id) => !leads.any((lead) => lead.id == id),
+            );
+            final allSelected =
+                leads.isNotEmpty &&
+                leads.every((lead) => _selectedLeadIds.contains(lead.id));
+            final canTransfer =
+                !_transferring &&
+                source != null &&
+                target != null &&
+                source.id != target.id &&
+                _selectedLeadIds.isNotEmpty;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _employeeDropdown(
+                        label: 'From employee',
+                        value: _sourceEmployeeId,
+                        employees: employees,
+                        onChanged: (value) {
+                          setState(() {
+                            _sourceEmployeeId = value;
+                            _selectedLeadIds.clear();
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _employeeDropdown(
+                        label: 'To employee',
+                        value: _targetEmployeeId,
+                        employees: employees
+                            .where(
+                              (employee) => employee.id != _sourceEmployeeId,
+                            )
+                            .toList(),
+                        onChanged: (value) => setState(() {
+                          _targetEmployeeId = value;
+                        }),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        onChanged: (value) => setState(() => _search = value),
+                        decoration: InputDecoration(
+                          labelText: 'Search selected employee leads',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton.icon(
+                      onPressed: canTransfer
+                          ? () => _transfer(leads, target)
+                          : null,
+                      icon: _transferring
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.swap_horiz_rounded),
+                      label: Text(
+                        _transferring
+                            ? 'Transferring...'
+                            : 'Transfer ${_selectedLeadIds.length}',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: DataTransferTab._primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: DataTransferTab._border),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(10),
+                            ),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: DataTransferTab._border,
+                              ),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: allSelected,
+                                onChanged: leads.isEmpty
+                                    ? null
+                                    : (_) => setState(() {
+                                        if (allSelected) {
+                                          _selectedLeadIds.clear();
+                                        } else {
+                                          _selectedLeadIds.addAll(
+                                            leads.map((lead) => lead.id),
+                                          );
+                                        }
+                                      }),
+                              ),
+                              Text(
+                                source == null
+                                    ? 'Select an employee to view leads'
+                                    : '${leads.length} lead(s) assigned to ${_employeeName(source.data())}',
+                                style: const TextStyle(
+                                  color: DataTransferTab._text,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '${_selectedLeadIds.length} selected',
+                                style: const TextStyle(
+                                  color: DataTransferTab._muted,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: leads.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'No leads found for this employee.',
+                                    style: TextStyle(
+                                      color: DataTransferTab._muted,
+                                    ),
+                                  ),
+                                )
+                              : ListView.separated(
+                                  itemCount: leads.length,
+                                  separatorBuilder: (context, index) =>
+                                      const Divider(
+                                        height: 1,
+                                        color: DataTransferTab._border,
+                                      ),
+                                  itemBuilder: (context, index) {
+                                    final lead = leads[index];
+                                    final data = lead.data();
+                                    final selected = _selectedLeadIds.contains(
+                                      lead.id,
+                                    );
+                                    return CheckboxListTile(
+                                      value: selected,
+                                      onChanged: (_) => setState(() {
+                                        selected
+                                            ? _selectedLeadIds.remove(lead.id)
+                                            : _selectedLeadIds.add(lead.id);
+                                      }),
+                                      controlAffinity:
+                                          ListTileControlAffinity.leading,
+                                      title: Text(
+                                        '${_leadName(data)}  |  ${_leadPhone(data)}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Lead ID: ${_leadId(data)}  |  ${_ownerStage(data, _sourceEmployeeId ?? '')}  |  ${(data['category'] ?? data['outcome'] ?? '').toString()}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      secondary: Text(
+                                        (data['directoryName'] ?? '')
+                                            .toString(),
+                                        style: const TextStyle(
+                                          color: DataTransferTab._muted,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _employeeDropdown({
+    required String label,
+    required String? value,
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> employees,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: employees.any((employee) => employee.id == value)
+          ? value
+          : null,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        isDense: true,
+      ),
+      items: employees.map((employee) {
+        final data = employee.data();
+        return DropdownMenuItem(
+          value: employee.id,
+          child: Text(
+            '${_employeeName(data)} (${_employeeRole(data)})',
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      }).toList(),
+      onChanged: onChanged,
+    );
+  }
 }
 
 class _TelecallerDistributionSectionState
@@ -282,7 +839,40 @@ class _TelecallerDistributionSectionState
   }
 
   // --- EXCEL FILE UPLOAD & PARSING ---
+  Future<bool> _confirmExcelFormat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Dump Excel Data Format'),
+        content: const SizedBox(
+          width: 460,
+          child: Text(
+            'Make the Excel sheet with these exact columns:\n\n'
+            'S.No | Name | Phone Number | City | Already Policy\n\n'
+            'Mandatory fields: Name and Phone Number only.\n'
+            'S.No, City, and Already Policy are optional.\n'
+            'You can add extra columns also; they will be saved and searchable, but the table will show the standard columns above.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.upload_file_rounded, size: 16),
+            label: const Text('Select Excel File'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
   Future<void> _pickExcelFile() async {
+    final proceed = await _confirmExcelFormat();
+    if (!proceed || !mounted) return;
     setState(() {
       _readingFile = true;
       _error = null;
@@ -370,6 +960,9 @@ class _TelecallerDistributionSectionState
           'mobileNumberKey': key,
           'city': contact.city,
           'alreadyPolicy': contact.alreadyPolicy,
+          'extraFields': contact.extraFields,
+          'extraSearchText': contact.extraSearchText,
+          'importHeaders': contact.importHeaders,
           'directoryId': _selectedDirectoryId,
           'directoryName': _selectedDirectoryName,
           'status': 'Unassigned',
@@ -402,9 +995,8 @@ class _TelecallerDistributionSectionState
       throw const FormatException('The Excel sheet is empty.');
     }
 
-    final header = rows[headerRowIndex]
-        .map((cell) => _normalizeHeader(_cellText(cell)))
-        .toList();
+    final header = rows[headerRowIndex].map((cell) => _cellText(cell)).toList();
+    final normalizedHeader = header.map(_normalizeHeader).toList();
 
     int nameIndex = -1;
     int mobileIndex = -1;
@@ -413,7 +1005,7 @@ class _TelecallerDistributionSectionState
     int policyIndex = -1;
 
     for (var i = 0; i < header.length; i++) {
-      final val = header[i];
+      final val = normalizedHeader[i];
       if (const {
         'name',
         'customername',
@@ -505,6 +1097,24 @@ class _TelecallerDistributionSectionState
       final alreadyPolicy = policyIndex >= 0 && policyIndex < row.length
           ? _cellText(row[policyIndex])
           : '';
+      final reservedIndexes = {
+        nameIndex,
+        mobileIndex,
+        sNoIndex,
+        cityIndex,
+        policyIndex,
+      }.where((index) => index >= 0).toSet();
+      final extraFields = <String, String>{};
+      for (var columnIndex = 0; columnIndex < header.length; columnIndex++) {
+        if (reservedIndexes.contains(columnIndex)) continue;
+        final label = header[columnIndex].trim().isNotEmpty
+            ? header[columnIndex].trim()
+            : 'Column ${columnIndex + 1}';
+        final value = columnIndex < row.length
+            ? _cellText(row[columnIndex])
+            : '';
+        if (value.isNotEmpty) extraFields[label] = value;
+      }
 
       final mobile = _normalizeMobile(rawMobile);
 
@@ -525,6 +1135,8 @@ class _TelecallerDistributionSectionState
             mobileNumber: mobile,
             city: city,
             alreadyPolicy: alreadyPolicy,
+            extraFields: extraFields,
+            importHeaders: header,
           ),
         );
       }
@@ -570,6 +1182,20 @@ class _TelecallerDistributionSectionState
     return digits.length > 10 ? digits.substring(digits.length - 10) : digits;
   }
 
+  String _extraFieldsText(Map<String, dynamic> data) {
+    final fields = data['extraFields'];
+    if (fields is! Map || fields.isEmpty) return '';
+    return fields.entries
+        .map((entry) {
+          final key = entry.key.toString().trim();
+          final value = entry.value?.toString().trim() ?? '';
+          if (value.isEmpty) return '';
+          return key.isEmpty ? value : '$key: $value';
+        })
+        .where((value) => value.isNotEmpty)
+        .join(' | ');
+  }
+
   bool _isActive(Map<String, dynamic> data) {
     if (data['is_active'] == false) return false;
     final status = (data['status'] ?? 'Active').toString().toLowerCase();
@@ -608,7 +1234,7 @@ class _TelecallerDistributionSectionState
       builder: (context) => AlertDialog(
         title: const Text('Confirm Data Distribution'),
         content: Text(
-          'Assign ${selectedContacts.length} selected record(s) equally among '
+          'Send ${selectedContacts.length} selected lead(s) to '
           '${selectedTelecallers.length} selected telecaller(s)?',
         ),
         actions: [
@@ -622,7 +1248,7 @@ class _TelecallerDistributionSectionState
               backgroundColor: const Color(0xFF0D2D4F),
               foregroundColor: Colors.white,
             ),
-            child: const Text('Distribute'),
+            child: const Text('Send Lead to Team'),
           ),
         ],
       ),
@@ -691,6 +1317,13 @@ class _TelecallerDistributionSectionState
             'mobileNumber': (contact['mobileNumber'] ?? '').toString(),
             'city': (contact['city'] ?? '').toString(),
             'alreadyPolicy': (contact['alreadyPolicy'] ?? '').toString(),
+            'extraFields': Map<String, dynamic>.from(
+              contact['extraFields'] as Map? ?? {},
+            ),
+            'extraSearchText': (contact['extraSearchText'] ?? '').toString(),
+            'importHeaders': List<dynamic>.from(
+              contact['importHeaders'] as List? ?? [],
+            ),
             'directoryId': (contact['directoryId'] ?? _selectedDirectoryId)
                 .toString(),
             'directoryName':
@@ -731,7 +1364,7 @@ class _TelecallerDistributionSectionState
         page: 'Data Transfer',
         action: 'Distributed Telecaller Data',
         description:
-            'Distributed ${selectedContacts.length} contacts equally among ${selectedTelecallers.length} telecallers in "$_selectedDirectoryName".',
+            'Sent ${selectedContacts.length} leads to ${selectedTelecallers.length} telecallers in "$_selectedDirectoryName".',
         targetId: batchReference.id,
         targetType: 'Data Transfer Batch',
         targetName: _selectedDirectoryName,
@@ -742,7 +1375,7 @@ class _TelecallerDistributionSectionState
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '${selectedContacts.length} record(s) distributed equally to '
+            '${selectedContacts.length} lead(s) sent to '
             '${selectedTelecallers.length} telecaller(s).',
           ),
           backgroundColor: const Color(0xFF059669),
@@ -846,6 +1479,14 @@ class _TelecallerDistributionSectionState
                     ); // 0 (Unassigned) before 1 (Assigned)
                   }
 
+                  final aSourceRow =
+                      (a.data()['sourceRow'] as num?)?.toInt() ?? 0;
+                  final bSourceRow =
+                      (b.data()['sourceRow'] as num?)?.toInt() ?? 0;
+                  if (aSourceRow != bSourceRow) {
+                    return aSourceRow.compareTo(bSourceRow);
+                  }
+
                   final aTime = a.data()['uploadedAt'];
                   final bTime = b.data()['uploadedAt'];
                   final aMs = aTime is Timestamp
@@ -854,7 +1495,7 @@ class _TelecallerDistributionSectionState
                   final bMs = bTime is Timestamp
                       ? bTime.millisecondsSinceEpoch
                       : 0;
-                  return bMs.compareTo(aMs);
+                  return aMs.compareTo(bMs);
                 });
 
                 // Apply in-directory search query and status filter
@@ -885,13 +1526,21 @@ class _TelecallerDistributionSectionState
                     final assignedTo = (data['assignedToName'] ?? '')
                         .toString()
                         .toLowerCase();
+                    final extra = [
+                      data['extraSearchText'],
+                      _extraFieldsText(data),
+                      ...(((data['importHeaders'] as List?) ?? const []).map(
+                        (value) => value.toString(),
+                      )),
+                    ].join(' ').toLowerCase();
 
                     return name.contains(query) ||
                         mobile.contains(query) ||
                         city.contains(query) ||
                         policy.contains(query) ||
                         sNo.contains(query) ||
-                        assignedTo.contains(query);
+                        assignedTo.contains(query) ||
+                        extra.contains(query);
                   }
                   return true;
                 }).toList();
@@ -1183,7 +1832,7 @@ class _TelecallerDistributionSectionState
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              '$totalCount records',
+                              '$totalCount leads',
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
@@ -1411,7 +2060,7 @@ class _TelecallerDistributionSectionState
                       : filteredContacts.isEmpty
                       ? const Center(
                           child: Text(
-                            'No records found in this directory view.',
+                            'No leads found in this directory view.',
                             style: TextStyle(
                               fontSize: 12,
                               color: DataTransferTab._muted,
@@ -1480,7 +2129,7 @@ class _TelecallerDistributionSectionState
                                     ),
                                   ),
                                   _gridDataCell(
-                                    (data['sNo'] ?? '${index + 1}').toString(),
+                                    '${index + 1}',
                                     flex: 1,
                                     isBold: true,
                                   ),
@@ -1570,7 +2219,7 @@ class _TelecallerDistributionSectionState
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '$selectedInDirectory record(s) checked out of $totalCount in $_selectedDirectoryName',
+                        '$selectedInDirectory lead(s) checked out of $totalCount in $_selectedDirectoryName',
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -1857,7 +2506,7 @@ class _TelecallerDistributionSectionState
                       horizontal: 4,
                     ),
                     itemCount: filteredTelecallers.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final doc = filteredTelecallers[index];
                       final data = doc.data();
@@ -1911,7 +2560,7 @@ class _TelecallerDistributionSectionState
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '$allocated recs',
+                                  '$allocated leads',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
@@ -1957,10 +2606,10 @@ class _TelecallerDistributionSectionState
                   _distributing
                       ? 'Distributing...'
                       : selectedCount == 0
-                      ? 'Select Records First'
+                      ? 'Select Leads First'
                       : _selectedTelecallerIds.isEmpty
                       ? 'Select Telecallers'
-                      : 'Send $selectedCount Records Equally',
+                      : 'Send $selectedCount Leads to Team',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -2022,6 +2671,8 @@ class _ImportedContact {
   final String mobileNumber;
   final String city;
   final String alreadyPolicy;
+  final Map<String, String> extraFields;
+  final List<String> importHeaders;
 
   const _ImportedContact({
     required this.sourceRow,
@@ -2030,7 +2681,12 @@ class _ImportedContact {
     required this.mobileNumber,
     this.city = '',
     this.alreadyPolicy = '',
+    this.extraFields = const {},
+    this.importHeaders = const [],
   });
+
+  String get extraSearchText =>
+      [...extraFields.keys, ...extraFields.values].join(' ').toLowerCase();
 }
 
 class _StoredImportResult {

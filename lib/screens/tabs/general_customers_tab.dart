@@ -6,10 +6,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import '../../widgets/auto_hide_controls.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../utils/audit_log_service.dart';
+import '../../utils/lead_serial_fields.dart';
 import '../../utils/lead_status_guard.dart';
 import '../../utils/lead_workflow_rules.dart';
 import '../../utils/pdf_picker.dart';
@@ -100,6 +102,7 @@ class GeneralCustomersTab extends StatefulWidget {
   final String? initialCustomerId;
   final String initialView;
   final bool lockView;
+  final VoidCallback? onBackToPolicyHolders;
 
   const GeneralCustomersTab({
     super.key,
@@ -109,6 +112,7 @@ class GeneralCustomersTab extends StatefulWidget {
     this.initialCustomerId,
     this.initialView = 'Leads',
     this.lockView = false,
+    this.onBackToPolicyHolders,
   });
 
   @override
@@ -171,6 +175,10 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
       (widget.currentUser?['role'] ?? '').toString().toLowerCase() ==
       'executive';
 
+  bool get _isTeamLeader =>
+      (widget.currentUser?['role'] ?? '').toString().toLowerCase() ==
+      'team_leader';
+
   String get _currentEmployeeId =>
       (widget.currentUser?['_profileDocId'] ?? widget.currentUser?['uid'] ?? '')
           .toString();
@@ -192,6 +200,22 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
         .toString()
         .trim()
         .toLowerCase();
+    if (_isTeamLeader) {
+      final teamLeaderIds = [
+        data['assignedByTeamLeaderId'],
+        data['teamLeaderId'],
+        data['teamLeaderAssignedToId'],
+        data['executiveAssignedByTeamLeaderId'],
+      ].map((value) => (value ?? '').toString().trim());
+      final teamLeaderNames = [
+        data['assignedByTeamLeaderName'],
+        data['teamLeaderName'],
+        data['teamLeaderAssignedToName'],
+        data['executiveAssignedByTeamLeaderName'],
+      ].map((value) => (value ?? '').toString().trim().toLowerCase());
+      return (id.isNotEmpty && teamLeaderIds.contains(id)) ||
+          (name.isNotEmpty && teamLeaderNames.contains(name));
+    }
     return (id.isNotEmpty && (employeeId == id || createdBy == id)) ||
         (name.isNotEmpty && employeeName == name);
   }
@@ -241,7 +265,9 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
         doc: _selectedCustomer!,
         category: widget.category,
         currentUser: widget.currentUser,
-        onBack: () => setState(() => _selectedCustomer = null),
+        onBack:
+            widget.onBackToPolicyHolders ??
+            () => setState(() => _selectedCustomer = null),
         onEdit: () => _showCustomerDialog(
           context,
           docId: _selectedCustomer!.id,
@@ -259,130 +285,137 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
     return Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            const Divider(height: 1, color: _border),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
+        child: AutoHideControlsRegion(
+          controls: _buildHeader(context),
+          divider: const Divider(height: 1, color: _border),
+          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _stream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: _accent),
+                );
+              }
+              if (snap.hasError) {
+                return Center(child: Text('Error: ${snap.error}'));
+              }
+              var docs = snap.data?.docs ?? [];
+              if (_search.isNotEmpty) {
+                docs = docs.where((d) {
+                  final data = d.data();
+                  return (data['fullName'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['leadUniqueId'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['uniqueLeadId'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['leadSerialNumber'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search) ||
+                      (data['mobileNumber'] ?? '')
+                          .toString()
+                          .toLowerCase()
+                          .contains(_search);
+                }).toList();
+              }
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _policyLinksStream,
+                builder: (context, policySnap) {
+                  if (policySnap.hasError) {
+                    return Center(child: Text('Error: ${policySnap.error}'));
+                  }
+                  if (!policySnap.hasData) {
                     return const Center(
                       child: CircularProgressIndicator(color: _accent),
                     );
                   }
-                  if (snap.hasError) {
-                    return Center(child: Text('Error: ${snap.error}'));
-                  }
-                  var docs = snap.data?.docs ?? [];
-                  if (_search.isNotEmpty) {
-                    docs = docs.where((d) {
-                      final data = d.data();
-                      return (data['fullName'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search) ||
-                          (data['mobileNumber'] ?? '')
-                              .toString()
-                              .toLowerCase()
-                              .contains(_search);
-                    }).toList();
-                  }
-                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _policyLinksStream,
-                    builder: (context, policySnap) {
-                      if (policySnap.hasError) {
-                        return Center(
-                          child: Text('Error: ${policySnap.error}'),
-                        );
-                      }
-                      if (!policySnap.hasData) {
-                        return const Center(
-                          child: CircularProgressIndicator(color: _accent),
-                        );
-                      }
-                      final policies = policySnap.data?.docs ?? [];
-                      final visibleDocs = docs.where((customer) {
-                        if (!_belongsToCurrentEmployee(customer.data())) {
-                          return false;
-                        }
-                        final linkedPolicies =
-                            _allowsLinkedPolicyDisplay(customer.data())
-                            ? _policiesForCustomer(
-                                policies,
-                                customer.id,
-                                widget.category,
-                              )
-                            : <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-                        if (!_customerBelongsToCategory(
-                          customer.data(),
-                          linkedPolicies,
-                          widget.category,
-                        )) {
-                          return false;
-                        }
-                        final isPolicyHolder = linkedPolicies.isNotEmpty;
-                        if (_customerView == 'Policy Holders') {
-                          return isPolicyHolder;
-                        }
-                        if (isPolicyHolder) return false;
-                        if (_leadFilter == 'All') return true;
-                        return _leadStatus(customer.data()) == _leadFilter;
-                      }).toList();
-                      _openInitialCustomerIfNeeded(visibleDocs);
-                      if (visibleDocs.isEmpty) return _buildEmpty(context);
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        scrollDirection: Axis.horizontal,
-                        child: SizedBox(
-                          width: 1050,
-                          child: Column(
-                            children: [
-                              const _CustomerListHeader(),
-                              Expanded(
-                                child: ListView.separated(
-                                  itemCount: visibleDocs.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(height: 0),
-                                  itemBuilder: (_, i) {
-                                    final customer = visibleDocs[i];
-                                    final linkedPolicies =
-                                        _allowsLinkedPolicyDisplay(
-                                          customer.data(),
-                                        )
-                                        ? _policiesForCustomer(
-                                            policies,
-                                            customer.id,
-                                            widget.category,
-                                          )
-                                        : <
-                                            QueryDocumentSnapshot<
-                                              Map<String, dynamic>
-                                            >
-                                          >[];
-                                    return _CustomerRow(
-                                      doc: customer,
-                                      linkedPolicy: linkedPolicies.isEmpty
-                                          ? null
-                                          : linkedPolicies.first.data(),
-                                      onTap: () => setState(
-                                        () => _selectedCustomer = customer,
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
+                  final policies = policySnap.data?.docs ?? [];
+                  final visibleDocs = docs.where((customer) {
+                    if (!_belongsToCurrentEmployee(customer.data())) {
+                      return false;
+                    }
+                    final linkedPolicies =
+                        _allowsLinkedPolicyDisplay(customer.data())
+                        ? _policiesForCustomer(
+                            policies,
+                            customer.id,
+                            widget.category,
+                          )
+                        : <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                    if (!_customerBelongsToCategory(
+                      customer.data(),
+                      linkedPolicies,
+                      widget.category,
+                    )) {
+                      return false;
+                    }
+                    final isPolicyHolder = linkedPolicies.isNotEmpty;
+                    if (_customerView == 'Policy Holders') {
+                      return isPolicyHolder;
+                    }
+                    if (customer.data()['policyLinkedManually'] != false) {
+                      return false;
+                    }
+                    if (isPolicyHolder) return false;
+                    if (_leadFilter == 'All') return true;
+                    return _leadStatus(customer.data()) == _leadFilter;
+                  }).toList();
+                  _openInitialCustomerIfNeeded(visibleDocs);
+                  if (visibleDocs.isEmpty) return _buildEmpty(context);
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 1050,
+                      child: Column(
+                        children: [
+                          const _CustomerListHeader(),
+                          Expanded(
+                            child: ListView.separated(
+                              itemCount: visibleDocs.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 0),
+                              itemBuilder: (_, i) {
+                                final customer = visibleDocs[i];
+                                final linkedPolicies =
+                                    _allowsLinkedPolicyDisplay(customer.data())
+                                    ? _policiesForCustomer(
+                                        policies,
+                                        customer.id,
+                                        widget.category,
+                                      )
+                                    : <
+                                        QueryDocumentSnapshot<
+                                          Map<String, dynamic>
+                                        >
+                                      >[];
+                                return _CustomerRow(
+                                  doc: customer,
+                                  linkedPolicy: linkedPolicies.isEmpty
+                                      ? null
+                                      : linkedPolicies.first.data(),
+                                  onTap: () => setState(
+                                    () => _selectedCustomer = customer,
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        ],
+                      ),
+                    ),
                   );
                 },
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -768,7 +801,7 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                   'employeeName': employeeName,
                   'employeeId': employeeId,
                   'searchKey':
-                      '${nameValue.toLowerCase()} $mobileValue $emailValue $panValue $aadhaarValue',
+                      '${nameValue.toLowerCase()} $mobileValue $emailValue $panValue $aadhaarValue ${leadUniqueIdFromData(existing ?? const {})}',
                   'updatedAt': FieldValue.serverTimestamp(),
                   'updatedBy': uid,
                 };
@@ -788,18 +821,28 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                     extra: {'customerName': nameValue},
                   );
                 } else {
+                  final customerRef = FirebaseFirestore.instance
+                      .collection('customers')
+                      .doc();
+                  final leadFields = await reserveCustomerLeadUniqueIdFields(
+                    category: widget.category,
+                    customerId: customerRef.id,
+                    customerName: nameValue,
+                  );
+                  data.addAll(leadFields);
+                  data['searchKey'] =
+                      '${data['searchKey']} ${leadFields['leadUniqueId'] ?? ''}'
+                          .trim();
                   data['createdAt'] = FieldValue.serverTimestamp();
                   data['createdBy'] = uid;
                   data['customerCategory'] = widget.category;
                   data['policyLinkedManually'] = false;
-                  final created = await FirebaseFirestore.instance
-                      .collection('customers')
-                      .add(data);
+                  await customerRef.set(data);
                   await AuditLogService.write(
                     page: '${widget.category} Customers',
                     action: 'Added Customer',
                     description: 'Added customer "$nameValue".',
-                    targetId: created.id,
+                    targetId: customerRef.id,
                     targetType: 'Customer',
                     targetName: nameValue,
                     extra: {'customerName': nameValue},
@@ -1533,6 +1576,8 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
     DateTime? policyStartDate;
     DateTime? policyEndDate;
     double commissionPercent = 0;
+    final commissionPercentCtrl = TextEditingController();
+    bool manualCommissionOverride = false;
     int? selectedGeneralSlabIndex;
     Map<String, dynamic>? selectedGeneralSlab;
 
@@ -1566,6 +1611,20 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
 
     double parseNum(String v) =>
         double.tryParse(v.replaceAll(',', '').trim()) ?? 0;
+
+    String percentInput(double value) {
+      final fixed = value.toStringAsFixed(2);
+      return fixed.replaceFirst(RegExp(r'\.00$'), '');
+    }
+
+    void setCommissionPercentValue(double value, {bool manual = false}) {
+      commissionPercent = value.clamp(0, 100).toDouble();
+      manualCommissionOverride = manual;
+      final text = percentInput(commissionPercent);
+      if (!manual && commissionPercentCtrl.text != text) {
+        commissionPercentCtrl.text = text;
+      }
+    }
 
     String fmtDate(DateTime? d) {
       if (d == null) return '';
@@ -1659,12 +1718,13 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
             // ── commission recompute ────────────────────────────────────────
             void recomputeCommission() {
               if (selectedPolicy == null) return;
+              if (manualCommissionOverride) return;
               final category =
                   selectedPolicy!['category']?.toString().toLowerCase() ?? '';
               if (category == 'general') {
                 setS(
-                  () => commissionPercent = generalSlabPercent(
-                    selectedGeneralSlab,
+                  () => setCommissionPercentValue(
+                    generalSlabPercent(selectedGeneralSlab),
                   ),
                 );
                 return;
@@ -1717,7 +1777,7 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                             double.tryParse(s['percent']?.toString() ?? '0') ??
                             0;
                         if (compareValue >= from && compareValue <= to) {
-                          setS(() => commissionPercent = pct);
+                          setS(() => setCommissionPercentValue(pct));
                           return;
                         }
                       }
@@ -1726,8 +1786,8 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                 }
               }
               setS(
-                () => commissionPercent = getPolicyRenewalCommissionPercent(
-                  selectedPolicy!,
+                () => setCommissionPercentValue(
+                  getPolicyRenewalCommissionPercent(selectedPolicy!),
                 ),
               );
             }
@@ -2019,6 +2079,17 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                     : productNameCtrl.text.trim();
 
                 final premiumAmount = parseNum(premiumCtrl.text);
+                if (commissionPercent < 0 || commissionPercent > 100) {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Commission percentage must be between 0 and 100.',
+                      ),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
                 final insuredSum = parseNum(sumInsuredCtrl.text);
                 final commissionEarned =
                     (premiumAmount * commissionPercent) / 100;
@@ -2055,6 +2126,7 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
 
                 final policyFields = {
                   ...policySerial.toFirestoreFields(),
+                  ...leadUniqueIdCopyFields(customerData),
                   'customerId': customerId,
                   'customerName': customerName,
                   'customerMobile': customerMobile,
@@ -2077,10 +2149,13 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                   'premiumAmount': premiumAmount,
                   'sumInsured': insuredSum,
                   'commissionPercent': commissionPercent,
+                  'commissionOverridden': manualCommissionOverride,
                   'renewalCommissionPercent': getPolicyRenewalCommissionPercent(
                     selectedPolicy!,
                   ),
                   'commissionAmount': commissionEarned,
+                  if (manualCommissionOverride)
+                    'commissionRule': 'Manual commission override',
                   'selectedSlabIndex': selectedGeneralSlabIndex,
                   'selectedSlabLabel': generalSlabLabel(selectedGeneralSlab),
                   'selectedSlabPercent': generalSlabPercent(
@@ -2446,7 +2521,7 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                                 DateTime.now(),
                                 12,
                               );
-                              commissionPercent = 0;
+                              setCommissionPercentValue(0);
                               if (premiumCtrl.text.isEmpty) premiumCtrl.clear();
                               if (sumInsuredCtrl.text.isEmpty)
                                 sumInsuredCtrl.clear();
@@ -2793,12 +2868,21 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                'Commission %: $commissionPercent%',
-                                style: const TextStyle(
-                                  color: _textMuted,
-                                  fontSize: 12,
+                              _tf(
+                                'Commission %',
+                                commissionPercentCtrl,
+                                type: const TextInputType.numberWithOptions(
+                                  decimal: true,
                                 ),
+                                onChanged: (value) {
+                                  final pct = parseNum(value);
+                                  setS(
+                                    () => setCommissionPercentValue(
+                                      pct,
+                                      manual: true,
+                                    ),
+                                  );
+                                },
                               ),
                               const SizedBox(height: 2),
                               Text(
@@ -2997,12 +3081,14 @@ class _GeneralCustomersTabState extends State<GeneralCustomersTab> {
     TextInputType type = TextInputType.text,
     int maxLines = 1,
     bool readOnly = false,
+    ValueChanged<String>? onChanged,
   }) {
     return TextField(
       controller: ctrl,
       keyboardType: type,
       maxLines: maxLines,
       readOnly: readOnly,
+      onChanged: onChanged,
       style: const TextStyle(fontSize: 13, color: _textMain),
       decoration: _tfDec(label),
     );
@@ -3121,8 +3207,8 @@ class _CustomerListHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
         color: _surface,
         border: Border(
@@ -3133,6 +3219,7 @@ class _CustomerListHeader extends StatelessWidget {
       child: const Row(
         children: [
           _HeaderCell('Customer', 170),
+          _HeaderCell('Unique ID', 118),
           _HeaderCell('Mobile', 110),
           _HeaderCell('Employee', 110),
           _HeaderCell('Policy No.', 120),
@@ -3169,7 +3256,7 @@ class _HeaderText extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: const TextStyle(
         color: _CustomerListHeader._primary,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: FontWeight.w900,
       ),
     );
@@ -3197,6 +3284,7 @@ class _CustomerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = doc.data();
     final name = data['fullName']?.toString() ?? '';
+    final uniqueId = leadUniqueIdFromData(data);
     final mobile = data['mobileNumber']?.toString() ?? '';
     final employee = (data['employeeName'] ?? data['employee'] ?? '')
         .toString();
@@ -3216,8 +3304,8 @@ class _CustomerRow extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        height: 66,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: const BoxDecoration(
           color: _surface,
           border: Border(bottom: BorderSide(color: _border, width: 0.7)),
@@ -3234,6 +3322,19 @@ class _CustomerRow extends StatelessWidget {
                   color: _textMain,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 118,
+              child: Text(
+                uniqueId.isEmpty ? '-' : uniqueId,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -3394,6 +3495,7 @@ class _CustomerDetailView extends StatelessWidget {
     required bool isAdmin,
   }) {
     final name = data['fullName']?.toString() ?? '';
+    final uniqueId = leadUniqueIdFromData(data);
     final mobile = data['mobileNumber']?.toString() ?? '';
     final email = data['email']?.toString() ?? '';
     final address = data['address']?.toString() ?? '';
@@ -3567,6 +3669,7 @@ class _CustomerDetailView extends StatelessWidget {
                   children: [
                     _excelCard('Personal Information', [
                       _xlRow('Full Name', name),
+                      _xlRow('Unique ID', uniqueId),
                       _xlRow('Mobile', mobile),
                       _xlRow('Email', email),
                       _xlRow('Gender', gender),

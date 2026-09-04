@@ -18,7 +18,6 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
   static const _textMuted = Color(0xFF8A94A6);
   static const _border = Color(0xFFE4E7EC);
   static const _green = Color(0xFF16A34A);
-  static const _red = Color(0xFFDC2626);
 
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
 
@@ -123,6 +122,16 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
     return DateTime.tryParse((value ?? '').toString());
   }
 
+  DateTime? _policyGivenDate(Map<String, dynamic> data) {
+    return _date(data['policyGivenDate']) ??
+        _date(data['givenDate']) ??
+        _date(data['issueDate']) ??
+        _date(data['issueDateFormatted']) ??
+        _date(data['policyStartDate']) ??
+        _date(data['policyStartDateFormatted']) ??
+        _date(data['createdAt']);
+  }
+
   double _num(dynamic value) {
     if (value is num) return value.toDouble();
     return double.tryParse((value ?? '').toString().replaceAll(',', '')) ?? 0;
@@ -181,10 +190,7 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
   }
 
   bool _inMonth(Map<String, dynamic> data) {
-    final date =
-        _date(data['createdAt']) ??
-        _date(data['issueDate']) ??
-        _date(data['policyStartDate']);
+    final date = _policyGivenDate(data);
     return date != null &&
         date.year == _month.year &&
         date.month == _month.month;
@@ -263,6 +269,18 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
       }
     }
     return 0;
+  }
+
+  int _callCountForEmployeeLead(
+    Map<String, dynamic> lead,
+    Map<String, dynamic> employee,
+  ) {
+    return switch (_roleOf(employee)) {
+      'telecaller' => (lead['telecallerCallCount'] as num?)?.toInt() ?? 0,
+      'executive' => (lead['executiveCallCount'] as num?)?.toInt() ?? 0,
+      'team_leader' => (lead['teamLeaderCallCount'] as num?)?.toInt() ?? 0,
+      _ => 0,
+    };
   }
 
   Future<void> _assignTarget(
@@ -426,6 +444,10 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
       final monthlyLeads = employeeLeads
           .where((lead) => _leadInMonth(lead.data(), data))
           .length;
+      final lifetimeCalls = employeeLeads.fold<int>(
+        0,
+        (total, lead) => total + _callCountForEmployeeLead(lead.data(), data),
+      );
       return _EmployeeSalesRow(
         doc: employee,
         name: name,
@@ -434,6 +456,7 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
         teamLeaderName: (data['teamLeaderName'] ?? '').toString(),
         allLeads: employeeLeads.length,
         monthlyLeads: monthlyLeads,
+        lifetimeCalls: lifetimeCalls,
         allSales: employeePolicies.length,
         monthlySales: monthlyPolicies.length,
         totalPremium: employeePolicies.fold<double>(
@@ -554,30 +577,6 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
                           0,
                           (total, row) => total + row.monthlyPremium,
                         );
-                        final totalTarget = metricRows.fold<double>(
-                          0,
-                          (total, row) => total + row.targetPremium,
-                        );
-                        final totalMonthlySales = metricRows.fold<int>(
-                          0,
-                          (total, row) => total + row.monthlySales,
-                        );
-                        final totalMonthlyLeads = (leadSnap.data?.docs ?? [])
-                            .where(
-                              (lead) => visibleEmployees.any(
-                                (employee) =>
-                                    _leadForEmployee(lead.data(), employee) &&
-                                    _leadInMonth(lead.data(), employee.data()),
-                              ),
-                            )
-                            .length;
-                        final progress = totalTarget <= 0
-                            ? 0.0
-                            : (totalMonthlyPremium / totalTarget).clamp(
-                                0.0,
-                                1.0,
-                              );
-
                         return Scaffold(
                           backgroundColor: _bg,
                           body: SafeArea(
@@ -594,34 +593,24 @@ class _AgentPerformanceTabState extends State<AgentPerformanceTab> {
                                         runSpacing: 12,
                                         children: [
                                           _MetricTile(
-                                            'Monthly Leads',
-                                            '$totalMonthlyLeads',
-                                            Icons.inbox_outlined,
-                                            _primary,
-                                          ),
-                                          _MetricTile(
-                                            'Monthly Sales',
-                                            '$totalMonthlySales',
-                                            Icons.verified_outlined,
-                                            _accent,
-                                          ),
-                                          _MetricTile(
-                                            'Monthly Premium',
+                                            'Total Business',
                                             _currency(totalMonthlyPremium),
                                             Icons.currency_rupee_rounded,
                                             _green,
                                           ),
                                           _MetricTile(
-                                            'Monthly Target',
-                                            _currency(totalTarget),
-                                            Icons.track_changes_rounded,
-                                            _primary,
-                                          ),
-                                          _MetricTile(
-                                            'Target Progress',
-                                            '${(progress * 100).round()}%',
-                                            Icons.insights_rounded,
-                                            progress >= 0.8 ? _green : _red,
+                                            'Earned Commission',
+                                            _currency(
+                                              metricRows.fold<double>(
+                                                0,
+                                                (total, row) =>
+                                                    total +
+                                                    row.monthlyCommission,
+                                              ),
+                                            ),
+                                            Icons
+                                                .account_balance_wallet_outlined,
+                                            _accent,
                                           ),
                                         ],
                                       ),
@@ -717,6 +706,7 @@ class _EmployeeSalesRow {
   final String teamLeaderName;
   final int allLeads;
   final int monthlyLeads;
+  final int lifetimeCalls;
   final int allSales;
   final int monthlySales;
   final double totalPremium;
@@ -734,6 +724,7 @@ class _EmployeeSalesRow {
     required this.teamLeaderName,
     required this.allLeads,
     required this.monthlyLeads,
+    required this.lifetimeCalls,
     required this.allSales,
     required this.monthlySales,
     required this.totalPremium,
@@ -759,6 +750,10 @@ class _EmployeeSalesRow {
       monthlyLeads: executives.fold(
         0,
         (total, row) => total + row.monthlyLeads,
+      ),
+      lifetimeCalls: executives.fold(
+        0,
+        (total, row) => total + row.lifetimeCalls,
       ),
       allSales: executives.fold(0, (total, row) => total + row.allSales),
       monthlySales: executives.fold(
@@ -948,6 +943,7 @@ class _EmployeeSalesTable extends StatelessWidget {
                     children: [
                       _mini('All Leads', '${row.allLeads}'),
                       _mini('Monthly Leads', '${row.monthlyLeads}'),
+                      _mini('Lifetime Calls', '${row.lifetimeCalls}'),
                       _mini('Total Premium', currency(row.totalPremium)),
                       _mini('Monthly Premium', currency(row.monthlyPremium)),
                       _mini(

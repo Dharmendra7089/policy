@@ -8,29 +8,40 @@ class CustomerDashboard extends StatefulWidget {
   const CustomerDashboard({super.key, required this.customerData});
 
   @override
-  State<CustomerDashboard> createState() =>
-      _CustomerDashboardState();
+  State<CustomerDashboard> createState() => _CustomerDashboardState();
 }
 
 class _CustomerDashboardState extends State<CustomerDashboard> {
   int _selectedIndex = 0;
 
-  static const _primary   = Color(0xFFD97706);
-  static const _bg        = Color(0xFFF0F2F5);
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _primary = Color(0xFFD97706);
+  static const _bg = Color(0xFFF0F2F5);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   final _navItems = const [
-    _CNavItem(icon: Icons.home_outlined,
-        activeIcon: Icons.home_rounded, label: 'Home'),
-    _CNavItem(icon: Icons.policy_outlined,
-        activeIcon: Icons.policy_rounded, label: 'My Policies'),
-    _CNavItem(icon: Icons.receipt_long_outlined,
-        activeIcon: Icons.receipt_long_rounded, label: 'Claims'),
-    _CNavItem(icon: Icons.person_outline_rounded,
-        activeIcon: Icons.person_rounded, label: 'Profile'),
+    _CNavItem(
+      icon: Icons.home_outlined,
+      activeIcon: Icons.home_rounded,
+      label: 'Home',
+    ),
+    _CNavItem(
+      icon: Icons.policy_outlined,
+      activeIcon: Icons.policy_rounded,
+      label: 'My Policies',
+    ),
+    _CNavItem(
+      icon: Icons.receipt_long_outlined,
+      activeIcon: Icons.receipt_long_rounded,
+      label: 'Claims',
+    ),
+    _CNavItem(
+      icon: Icons.person_outline_rounded,
+      activeIcon: Icons.person_rounded,
+      label: 'Profile',
+    ),
   ];
 
   Future<void> _logout() async {
@@ -62,33 +73,32 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final name =
-        widget.customerData['name'] ?? 'Customer';
+    final name = widget.customerData['name'] ?? 'Customer';
     final isWide = MediaQuery.of(context).size.width > 860;
 
     return Scaffold(
       backgroundColor: _bg,
       body: isWide
           ? Row(
-        children: [
-          _buildSidebar(name),
-          Expanded(
-            child: Column(
+              children: [
+                _buildSidebar(name),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildTopBar(name),
+                      Expanded(child: _getPage()),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Column(
               children: [
                 _buildTopBar(name),
                 Expanded(child: _getPage()),
+                _buildBottomNav(),
               ],
             ),
-          ),
-        ],
-      )
-          : Column(
-        children: [
-          _buildTopBar(name),
-          Expanded(child: _getPage()),
-          _buildBottomNav(),
-        ],
-      ),
     );
   }
 
@@ -115,27 +125,33 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                   child: Text(
                     name.isNotEmpty ? name[0].toUpperCase() : 'C',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700),
-                          overflow: TextOverflow.ellipsis),
-                      const Text('Customer',
-                          style: TextStyle(
-                              color: Color(0xFFFDE68A),
-                              fontSize: 11)),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Text(
+                        'Customer',
+                        style: TextStyle(
+                          color: Color(0xFFFDE68A),
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -151,43 +167,38 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
                 final item = _navItems[i];
                 final isSelected = _selectedIndex == i;
                 return GestureDetector(
-                  onTap: () =>
-                      setState(() => _selectedIndex = i),
+                  onTap: () => setState(() => _selectedIndex = i),
                   child: AnimatedContainer(
-                    duration:
-                    const Duration(milliseconds: 150),
+                    duration: const Duration(milliseconds: 150),
                     margin: const EdgeInsets.only(bottom: 4),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 11),
+                      horizontal: 12,
+                      vertical: 11,
+                    ),
                     decoration: BoxDecoration(
                       color: isSelected
                           ? _primary.withOpacity(0.1)
                           : Colors.transparent,
-                      borderRadius:
-                      BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          isSelected
-                              ? item.activeIcon
-                              : item.icon,
+                          isSelected ? item.activeIcon : item.icon,
                           size: 18,
-                          color: isSelected
-                              ? _primary
-                              : _textMuted,
+                          color: isSelected ? _primary : _textMuted,
                         ),
                         const SizedBox(width: 10),
-                        Text(item.label,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? _primary
-                                  : _textMuted,
-                              fontSize: 13,
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                            )),
+                        Text(
+                          item.label,
+                          style: TextStyle(
+                            color: isSelected ? _primary : _textMuted,
+                            fontSize: 13,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -201,25 +212,32 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
               onTap: _logout,
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 11),
+                  horizontal: 12,
+                  vertical: 11,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                      color: const Color(0xFFDC2626)
-                          .withOpacity(0.2)),
+                    color: const Color(0xFFDC2626).withOpacity(0.2),
+                  ),
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.logout_rounded,
-                        size: 18,
-                        color: Color(0xFFDC2626)),
+                    Icon(
+                      Icons.logout_rounded,
+                      size: 18,
+                      color: Color(0xFFDC2626),
+                    ),
                     SizedBox(width: 10),
-                    Text('Logout',
-                        style: TextStyle(
-                            color: Color(0xFFDC2626),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
+                    Text(
+                      'Logout',
+                      style: TextStyle(
+                        color: Color(0xFFDC2626),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -231,69 +249,97 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
   }
 
   Widget _buildTopBar(String name) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 430;
     return Container(
       color: _surface,
       padding: EdgeInsets.fromLTRB(
-          20,
-          MediaQuery.of(context).padding.top + 12,
-          20,
-          12),
+        compact ? 12 : 20,
+        MediaQuery.of(context).padding.top + (compact ? 7 : 12),
+        compact ? 8 : 20,
+        compact ? 7 : 12,
+      ),
       child: Row(
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: compact ? 28 : 32,
+            height: compact ? 28 : 32,
             decoration: BoxDecoration(
               color: _primary,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(7),
             ),
             child: const Center(
-              child: Text('MF',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900)),
+              child: Text(
+                'MF',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 10),
-          const Column(
+          SizedBox(width: compact ? 8 : 10),
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Makk Finsol',
-                  style: TextStyle(
-                      color: _textMain,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700)),
-              Text('Customer Portal',
-                  style: TextStyle(
-                      color: _textMuted, fontSize: 11)),
+              Text(
+                'Makk Finsol',
+                style: TextStyle(
+                  color: _textMain,
+                  fontSize: compact ? 12 : 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (!compact)
+                const Text(
+                  'Customer Portal',
+                  style: TextStyle(color: _textMuted, fontSize: 11),
+                ),
             ],
           ),
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 5),
+            constraints: BoxConstraints(maxWidth: compact ? 108 : 180),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 7 : 10,
+              vertical: compact ? 4 : 5,
+            ),
             decoration: BoxDecoration(
               color: _primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.person_rounded,
-                    size: 13, color: _primary),
+                const Icon(Icons.person_rounded, size: 13, color: _primary),
                 const SizedBox(width: 5),
-                Text(name,
+                Flexible(
+                  child: Text(
+                    name,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: _primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600)),
+                      color: _primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: compact ? 2 : 8),
           IconButton(
-            icon: const Icon(Icons.logout_rounded,
-                color: Color(0xFFDC2626), size: 20),
+            constraints: BoxConstraints.tightFor(
+              width: compact ? 34 : 40,
+              height: compact ? 34 : 40,
+            ),
+            padding: EdgeInsets.zero,
+            icon: const Icon(
+              Icons.logout_rounded,
+              color: Color(0xFFDC2626),
+              size: 20,
+            ),
             onPressed: _logout,
             tooltip: 'Logout',
           ),
@@ -306,8 +352,7 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
     return Container(
       decoration: const BoxDecoration(
         color: _surface,
-        border:
-        Border(top: BorderSide(color: _border)),
+        border: Border(top: BorderSide(color: _border)),
       ),
       child: Row(
         children: List.generate(_navItems.length, (i) {
@@ -315,32 +360,30 @@ class _CustomerDashboardState extends State<CustomerDashboard> {
           final isSelected = _selectedIndex == i;
           return Expanded(
             child: GestureDetector(
-              onTap: () =>
-                  setState(() => _selectedIndex = i),
+              onTap: () => setState(() => _selectedIndex = i),
               child: Container(
-                padding:
-                const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                        isSelected
-                            ? item.activeIcon
-                            : item.icon,
-                        size: 22,
-                        color: isSelected
-                            ? _primary
-                            : _textMuted),
+                      isSelected ? item.activeIcon : item.icon,
+                      size: 22,
+                      color: isSelected ? _primary : _textMuted,
+                    ),
                     const SizedBox(height: 3),
-                    Text(item.label,
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: isSelected
-                                ? _primary
-                                : _textMuted,
-                            fontWeight: isSelected
-                                ? FontWeight.w700
-                                : FontWeight.w400)),
+                    Text(
+                      item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: isSelected ? _primary : _textMuted,
+                        fontWeight: isSelected
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -357,16 +400,16 @@ class _CustomerHome extends StatelessWidget {
   final Map<String, dynamic> customerData;
   const _CustomerHome({required this.customerData});
 
-  static const _primary   = Color(0xFFD97706);
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _primary = Color(0xFFD97706);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   @override
   Widget build(BuildContext context) {
     final name = customerData['name'] ?? 'Customer';
-    final uid  = customerData['uid'] ?? '';
+    final uid = customerData['uid'] ?? '';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -391,15 +434,15 @@ class _CustomerHome extends StatelessWidget {
                 Text(
                   'Hello, ${name.split(' ').first}! 👋',
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800),
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 const Text(
                   'Here\'s a summary of your insurance.',
-                  style: TextStyle(
-                      color: Color(0xFFFDE68A), fontSize: 13),
+                  style: TextStyle(color: Color(0xFFFDE68A), fontSize: 13),
                 ),
               ],
             ),
@@ -415,18 +458,13 @@ class _CustomerHome extends StatelessWidget {
             builder: (context, snapshot) {
               final docs = snapshot.data?.docs ?? [];
               final active = docs
-                  .where((d) =>
-              (d.data() as Map)['status'] == 'active')
+                  .where((d) => (d.data() as Map)['status'] == 'active')
                   .length;
               final expired = docs
-                  .where((d) =>
-              (d.data() as Map)['status'] == 'expired')
+                  .where((d) => (d.data() as Map)['status'] == 'expired')
                   .length;
               return GridView.count(
-                crossAxisCount:
-                MediaQuery.of(context).size.width > 600
-                    ? 3
-                    : 2,
+                crossAxisCount: MediaQuery.of(context).size.width > 600 ? 3 : 2,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisSpacing: 12,
@@ -434,20 +472,23 @@ class _CustomerHome extends StatelessWidget {
                 childAspectRatio: 1.5,
                 children: [
                   _CKpiCard(
-                      label: 'Total Policies',
-                      value: '${docs.length}',
-                      icon: Icons.policy_rounded,
-                      color: _primary),
+                    label: 'Total Policies',
+                    value: '${docs.length}',
+                    icon: Icons.policy_rounded,
+                    color: _primary,
+                  ),
                   _CKpiCard(
-                      label: 'Active',
-                      value: '$active',
-                      icon: Icons.check_circle_rounded,
-                      color: const Color(0xFF16A34A)),
+                    label: 'Active',
+                    value: '$active',
+                    icon: Icons.check_circle_rounded,
+                    color: const Color(0xFF16A34A),
+                  ),
                   _CKpiCard(
-                      label: 'Expired',
-                      value: '$expired',
-                      icon: Icons.cancel_rounded,
-                      color: const Color(0xFFDC2626)),
+                    label: 'Expired',
+                    value: '$expired',
+                    icon: Icons.cancel_rounded,
+                    color: const Color(0xFFDC2626),
+                  ),
                 ],
               );
             },
@@ -455,11 +496,14 @@ class _CustomerHome extends StatelessWidget {
           const SizedBox(height: 24),
 
           // Recent policies
-          const Text('My Policies',
-              style: TextStyle(
-                  color: _textMain,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800)),
+          const Text(
+            'My Policies',
+            style: TextStyle(
+              color: _textMain,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 12),
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -467,11 +511,13 @@ class _CustomerHome extends StatelessWidget {
                 .where('customer_uid', isEqualTo: uid)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState ==
-                  ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
-                    child: CircularProgressIndicator(
-                        color: _primary, strokeWidth: 2));
+                  child: CircularProgressIndicator(
+                    color: _primary,
+                    strokeWidth: 2,
+                  ),
+                );
               }
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
@@ -484,10 +530,9 @@ class _CustomerHome extends StatelessWidget {
                   ),
                   child: const Center(
                     child: Text(
-                        'No policies found.',
-                        style: TextStyle(
-                            color: _textMuted,
-                            fontSize: 13)),
+                      'No policies found.',
+                      style: TextStyle(color: _textMuted, fontSize: 13),
+                    ),
                   ),
                 );
               }
@@ -495,11 +540,9 @@ class _CustomerHome extends StatelessWidget {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: docs.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(height: 10),
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (_, i) {
-                  final data =
-                  docs[i].data() as Map<String, dynamic>;
+                  final data = docs[i].data() as Map<String, dynamic>;
                   return _PolicyCard(data: data);
                 },
               );
@@ -516,11 +559,11 @@ class _CustomerPolicies extends StatelessWidget {
   final String uid;
   const _CustomerPolicies({required this.uid});
 
-  static const _primary   = Color(0xFFD97706);
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _primary = Color(0xFFD97706);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   @override
   Widget build(BuildContext context) {
@@ -530,11 +573,14 @@ class _CustomerPolicies extends StatelessWidget {
         Container(
           color: _surface,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-          child: const Text('My Policies',
-              style: TextStyle(
-                  color: _textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800)),
+          child: const Text(
+            'My Policies',
+            style: TextStyle(
+              color: _textMain,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
         const Divider(height: 1, color: Color(0xFFE5E7EB)),
         Expanded(
@@ -544,11 +590,13 @@ class _CustomerPolicies extends StatelessWidget {
                 .where('customer_uid', isEqualTo: uid)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState ==
-                  ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
-                    child: CircularProgressIndicator(
-                        color: _primary, strokeWidth: 2));
+                  child: CircularProgressIndicator(
+                    color: _primary,
+                    strokeWidth: 2,
+                  ),
+                );
               }
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
@@ -556,14 +604,16 @@ class _CustomerPolicies extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.policy_outlined,
-                          size: 48,
-                          color: _textMuted.withOpacity(0.3)),
+                      Icon(
+                        Icons.policy_outlined,
+                        size: 48,
+                        color: _textMuted.withOpacity(0.3),
+                      ),
                       const SizedBox(height: 12),
-                      const Text('No policies found.',
-                          style: TextStyle(
-                              color: _textMuted,
-                              fontSize: 14)),
+                      const Text(
+                        'No policies found.',
+                        style: TextStyle(color: _textMuted, fontSize: 14),
+                      ),
                     ],
                   ),
                 );
@@ -571,11 +621,9 @@ class _CustomerPolicies extends StatelessWidget {
               return ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: docs.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(height: 10),
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (_, i) {
-                  final data =
-                  docs[i].data() as Map<String, dynamic>;
+                  final data = docs[i].data() as Map<String, dynamic>;
                   return _PolicyCard(data: data);
                 },
               );
@@ -592,11 +640,11 @@ class _CustomerClaims extends StatelessWidget {
   final String uid;
   const _CustomerClaims({required this.uid});
 
-  static const _primary   = Color(0xFFD97706);
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _primary = Color(0xFFD97706);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   @override
   Widget build(BuildContext context) {
@@ -606,11 +654,14 @@ class _CustomerClaims extends StatelessWidget {
         Container(
           color: _surface,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-          child: const Text('My Claims',
-              style: TextStyle(
-                  color: _textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800)),
+          child: const Text(
+            'My Claims',
+            style: TextStyle(
+              color: _textMain,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ),
         const Divider(height: 1, color: Color(0xFFE5E7EB)),
         Expanded(
@@ -620,11 +671,13 @@ class _CustomerClaims extends StatelessWidget {
                 .where('customer_uid', isEqualTo: uid)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState ==
-                  ConnectionState.waiting) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
-                    child: CircularProgressIndicator(
-                        color: _primary, strokeWidth: 2));
+                  child: CircularProgressIndicator(
+                    color: _primary,
+                    strokeWidth: 2,
+                  ),
+                );
               }
               final docs = snapshot.data?.docs ?? [];
               if (docs.isEmpty) {
@@ -632,14 +685,16 @@ class _CustomerClaims extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.receipt_long_outlined,
-                          size: 48,
-                          color: _textMuted.withOpacity(0.3)),
+                      Icon(
+                        Icons.receipt_long_outlined,
+                        size: 48,
+                        color: _textMuted.withOpacity(0.3),
+                      ),
                       const SizedBox(height: 12),
-                      const Text('No claims filed yet.',
-                          style: TextStyle(
-                              color: _textMuted,
-                              fontSize: 14)),
+                      const Text(
+                        'No claims filed yet.',
+                        style: TextStyle(color: _textMuted, fontSize: 14),
+                      ),
                     ],
                   ),
                 );
@@ -647,11 +702,9 @@ class _CustomerClaims extends StatelessWidget {
               return ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: docs.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(height: 10),
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (_, i) {
-                  final data =
-                  docs[i].data() as Map<String, dynamic>;
+                  final data = docs[i].data() as Map<String, dynamic>;
                   final status = data['status'] ?? 'submitted';
                   Color statusColor;
                   Color statusBg;
@@ -686,54 +739,55 @@ class _CustomerClaims extends StatelessWidget {
                           height: 40,
                           decoration: BoxDecoration(
                             color: statusColor.withOpacity(0.1),
-                            borderRadius:
-                            BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
-                              Icons.receipt_long_rounded,
-                              color: statusColor,
-                              size: 20),
+                            Icons.receipt_long_rounded,
+                            color: statusColor,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                data['claim_number'] ??
-                                    'Claim',
+                                data['claim_number'] ?? 'Claim',
                                 style: const TextStyle(
-                                    color: _textMain,
-                                    fontSize: 14,
-                                    fontWeight:
-                                    FontWeight.w700),
+                                  color: _textMain,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                data['policy_number'] ??
-                                    'Policy N/A',
+                                data['policy_number'] ?? 'Policy N/A',
                                 style: const TextStyle(
-                                    color: _textMuted,
-                                    fontSize: 12),
+                                  color: _textMuted,
+                                  fontSize: 12,
+                                ),
                               ),
                             ],
                           ),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: statusBg,
-                            borderRadius:
-                            BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(20),
                           ),
-                          child: Text(status,
-                              style: TextStyle(
-                                  color: statusColor,
-                                  fontSize: 10,
-                                  fontWeight:
-                                  FontWeight.w700)),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -753,15 +807,15 @@ class _CustomerProfile extends StatelessWidget {
   final Map<String, dynamic> customerData;
   const _CustomerProfile({required this.customerData});
 
-  static const _primary   = Color(0xFFD97706);
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _primary = Color(0xFFD97706);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   @override
   Widget build(BuildContext context) {
-    final name  = customerData['name'] ?? 'Customer';
+    final name = customerData['name'] ?? 'Customer';
     final email = customerData['email'] ?? 'N/A';
     final phone = customerData['phone'] ?? 'N/A';
 
@@ -784,37 +838,43 @@ class _CustomerProfile extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 36,
-                  backgroundColor:
-                  Colors.white.withOpacity(0.2),
+                  backgroundColor: Colors.white.withOpacity(0.2),
                   child: Text(
-                    name.isNotEmpty
-                        ? name[0].toUpperCase()
-                        : 'C',
+                    name.isNotEmpty ? name[0].toUpperCase() : 'C',
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800),
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(name,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 4),
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Text('Customer',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Customer',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -830,22 +890,22 @@ class _CustomerProfile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Profile Details',
-                    style: TextStyle(
-                        color: _textMain,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700)),
+                const Text(
+                  'Profile Details',
+                  style: TextStyle(
+                    color: _textMain,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 16),
-                _infoRow(Icons.person_outline_rounded,
-                    'Full Name', name),
+                _infoRow(Icons.person_outline_rounded, 'Full Name', name),
                 const Divider(height: 24),
-                _infoRow(Icons.alternate_email_rounded,
-                    'Email', email),
+                _infoRow(Icons.alternate_email_rounded, 'Email', email),
                 const Divider(height: 24),
                 _infoRow(Icons.phone_outlined, 'Phone', phone),
                 const Divider(height: 24),
-                _infoRow(Icons.people_outline_rounded,
-                    'Role', 'Customer'),
+                _infoRow(Icons.people_outline_rounded, 'Role', 'Customer'),
               ],
             ),
           ),
@@ -867,18 +927,26 @@ class _CustomerProfile extends StatelessWidget {
           child: Icon(icon, size: 16, color: _primary),
         ),
         const SizedBox(width: 14),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label,
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(color: _textMuted, fontSize: 11),
+              ),
+              Text(
+                value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                    color: _textMuted, fontSize: 11)),
-            Text(value,
-                style: const TextStyle(
-                    color: _textMain,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600)),
-          ],
+                  color: _textMain,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -890,11 +958,11 @@ class _PolicyCard extends StatelessWidget {
   final Map<String, dynamic> data;
   const _PolicyCard({required this.data});
 
-  static const _surface   = Color(0xFFFFFFFF);
-  static const _textMain  = Color(0xFF111827);
+  static const _surface = Color(0xFFFFFFFF);
+  static const _textMain = Color(0xFF111827);
   static const _textMuted = Color(0xFF6B7280);
-  static const _border    = Color(0xFFE5E7EB);
-  static const _primary   = Color(0xFFD97706);
+  static const _border = Color(0xFFE5E7EB);
+  static const _primary = Color(0xFFD97706);
 
   @override
   Widget build(BuildContext context) {
@@ -930,44 +998,48 @@ class _PolicyCard extends StatelessWidget {
               color: _primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.policy_rounded,
-                color: _primary, size: 20),
+            child: const Icon(Icons.policy_rounded, color: _primary, size: 20),
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(data['policy_number'] ?? 'N/A',
-                    style: const TextStyle(
-                        color: _textMain,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700)),
+                Text(
+                  data['policy_number'] ?? 'N/A',
+                  style: const TextStyle(
+                    color: _textMain,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 3),
                 Text(
-                    'Type: ${data['policy_type'] ?? 'N/A'}',
-                    style: const TextStyle(
-                        color: _textMuted, fontSize: 12)),
+                  'Type: ${data['policy_type'] ?? 'N/A'}',
+                  style: const TextStyle(color: _textMuted, fontSize: 12),
+                ),
                 const SizedBox(height: 3),
                 Text(
-                    'Premium: ₹${data['premium_amount'] ?? '--'}',
-                    style: const TextStyle(
-                        color: _textMuted, fontSize: 11)),
+                  'Premium: ₹${data['premium_amount'] ?? '--'}',
+                  style: const TextStyle(color: _textMuted, fontSize: 11),
+                ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: statusBg,
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(status,
-                style: TextStyle(
-                    color: statusColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700)),
+            child: Text(
+              status,
+              style: TextStyle(
+                color: statusColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
         ],
       ),
@@ -988,9 +1060,9 @@ class _CKpiCard extends StatelessWidget {
     required this.color,
   });
 
-  static const _surface  = Color(0xFFFFFFFF);
+  static const _surface = Color(0xFFFFFFFF);
   static const _textMain = Color(0xFF111827);
-  static const _border   = Color(0xFFE5E7EB);
+  static const _border = Color(0xFFE5E7EB);
 
   @override
   Widget build(BuildContext context) {
@@ -1017,15 +1089,18 @@ class _CKpiCard extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(value,
-                  style: const TextStyle(
-                      color: _textMain,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800)),
-              Text(label,
-                  style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 11)),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: _textMain,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+              ),
             ],
           ),
         ],
@@ -1038,8 +1113,9 @@ class _CNavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
-  const _CNavItem(
-      {required this.icon,
-        required this.activeIcon,
-        required this.label});
+  const _CNavItem({
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
 }

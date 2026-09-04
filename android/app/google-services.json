@@ -58,6 +58,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "26394488999-5kq0unuv7of3b32dh3gsuonaep0mngvq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.insure.insurance",
+            "certificate_hash": "fcf02df43e88eb3930ade3a1afbd0849466184c7"
+          }
+        },
+        {
           "client_id": "26394488999-fpeovj7949q5tcfph6jh8lglb53jld4r.apps.googleusercontent.com",
           "client_type": 3
         }

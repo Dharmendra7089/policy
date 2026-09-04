@@ -2,21 +2,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class AgriculturalRevenueTab extends StatefulWidget {
+class AgricultureRevenueTab extends StatefulWidget {
   final String category;
   final String title;
 
-  const AgriculturalRevenueTab({
+  const AgricultureRevenueTab({
     super.key,
-    this.category = 'Agricultural',
-    this.title = 'Agricultural Revenue',
+    this.category = 'Agriculture',
+    this.title = 'Agriculture Revenue',
   });
 
   @override
-  State<AgriculturalRevenueTab> createState() => _AgriculturalRevenueTabState();
+  State<AgricultureRevenueTab> createState() => _AgricultureRevenueTabState();
 }
 
-class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
+class _AgricultureRevenueTabState extends State<AgricultureRevenueTab> {
   static const _primary = Color(0xFF0D2D4F);
   static const _accent = Color(0xFF1A6EBD);
   static const _bg = Color(0xFFF4F6F9);
@@ -38,12 +38,25 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
 
   // ─── Streams ───────────────────────────────────────────────────────────────
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> get _policyStream =>
-      FirebaseFirestore.instance
-          .collection('agricultural_policies')
-          .where('category', isEqualTo: widget.category)
-          .where('status', isEqualTo: 'Active')
-          .snapshots();
+  static String _categoryKey(String value) {
+    final key = value.trim().toLowerCase();
+    return key == 'agricultural' ? 'agriculture' : key;
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> get _policyStream {
+    var query = FirebaseFirestore.instance
+        .collection('agricultural_policies')
+        .where('status', isEqualTo: 'Active');
+    if (_categoryKey(widget.category) == 'agriculture') {
+      query = query.where(
+        'category',
+        whereIn: const ['Agriculture', 'Agricultural'],
+      );
+    } else {
+      query = query.where('category', isEqualTo: widget.category);
+    }
+    return query.snapshots();
+  }
 
   // ─── Formatters ────────────────────────────────────────────────────────────
 
@@ -349,7 +362,7 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
                 );
 
                 batch.set(FirebaseFirestore.instance.collection('logs').doc(), {
-                  'page': 'Agricultural Revenue',
+                  'page': 'Agriculture Revenue',
                   'action': 'Manual Slab Override',
                   'customerPolicyId': docId,
                   'policyId': _selectedPolicyId,
@@ -535,7 +548,7 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
           if (_selectedPolicyId != null) const SizedBox(width: 12),
           const Expanded(
             child: Text(
-              'Agricultural Revenue',
+              'Agriculture Revenue',
               style: TextStyle(
                 color: _textMain,
                 fontSize: 18,
@@ -576,7 +589,7 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
         if (policies.isEmpty) {
           return const Center(
             child: Text(
-              'No active Agricultural policies found.',
+              'No active Agriculture policies found.',
               style: TextStyle(color: _textMuted),
             ),
           );
@@ -595,13 +608,13 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Choose a Agricultural policy, then select start and end dates.',
+              'Choose a Agriculture policy, then select start and end dates.',
               style: TextStyle(color: _textMuted, fontSize: 13),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               initialValue: _selectedPolicyId,
-              hint: const Text('Select Agricultural policy'),
+              hint: const Text('Select Agriculture policy'),
               isExpanded: true,
               items: policies.map((p) {
                 return DropdownMenuItem<String>(
@@ -847,7 +860,7 @@ class _AgriculturalRevenueTabState extends State<AgriculturalRevenueTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Agricultural Slabs',
+                    'Agriculture Slabs',
                     style: TextStyle(
                       color: _textMain,
                       fontSize: 15,
@@ -1306,9 +1319,9 @@ class _Card extends StatelessWidget {
       width: 180,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _AgriculturalRevenueTabState._surface,
+        color: _AgricultureRevenueTabState._surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _AgriculturalRevenueTabState._border),
+        border: Border.all(color: _AgricultureRevenueTabState._border),
       ),
       child: Row(
         children: [
@@ -1329,7 +1342,7 @@ class _Card extends StatelessWidget {
                 Text(
                   value,
                   style: const TextStyle(
-                    color: _AgriculturalRevenueTabState._textMain,
+                    color: _AgricultureRevenueTabState._textMain,
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1337,7 +1350,7 @@ class _Card extends StatelessWidget {
                 Text(
                   title,
                   style: const TextStyle(
-                    color: _AgriculturalRevenueTabState._textMuted,
+                    color: _AgricultureRevenueTabState._textMuted,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1360,9 +1373,9 @@ class _Panel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _AgriculturalRevenueTabState._surface,
+        color: _AgricultureRevenueTabState._surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _AgriculturalRevenueTabState._border),
+        border: Border.all(color: _AgricultureRevenueTabState._border),
       ),
       child: child,
     );

@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../utils/lead_serial_fields.dart';
+import '../../widgets/auto_hide_controls.dart';
 import '../../widgets/company_logo.dart';
 import '../../widgets/customer_files_card.dart';
 
@@ -29,6 +31,7 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
   String _searchQuery = '';
   String _sortBy = 'createdAt';
   bool _sortAsc = false;
+  String _categoryFilter = 'All';
 
   Future<void> _openPdfUrl(BuildContext context, String url) async {
     final uri = Uri.tryParse(url);
@@ -44,10 +47,19 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
   final List<_SortOption> _sortOptions = const [
     _SortOption('customerName', 'Customer', 'A→Z', 'Z→A'),
     _SortOption('policyName', 'Policy', 'A→Z', 'Z→A'),
-    _SortOption('policyCode', 'Code', 'A→Z', 'Z→A'),
+    _SortOption('leadUniqueId', 'Unique ID', 'A→Z', 'Z→A'),
     _SortOption('policyStartDate', 'Active Date', 'Oldest', 'Newest'),
     _SortOption('policyEndDate', 'Expiry Date', 'Oldest', 'Newest'),
     _SortOption('createdAt', 'Created', 'Oldest', 'Newest'),
+  ];
+
+  static const _categoryFilters = [
+    'All',
+    'Health',
+    'Life',
+    'General',
+    'Agriculture',
+    'ECGC',
   ];
 
   static const _columns = [
@@ -57,13 +69,19 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
     _ColDef('Category', 95, Alignment.center),
     _ColDef('Company', 175, Alignment.centerLeft),
     _ColDef('Policy Name', 170, Alignment.centerLeft),
-    _ColDef('Code', 120, Alignment.centerLeft),
+    _ColDef('Unique ID', 120, Alignment.centerLeft),
+    _ColDef('Policy No.', 125, Alignment.centerLeft),
     _ColDef('Policy Added By', 135, Alignment.centerLeft),
     _ColDef('Active Date', 105, Alignment.center),
     _ColDef('Expiry Date', 105, Alignment.center),
     _ColDef('Status', 95, Alignment.center),
     _ColDef('Notes', 95, Alignment.center),
   ];
+
+  static String _categoryKey(String value) {
+    final key = value.trim().toLowerCase();
+    return key == 'agricultural' ? 'agriculture' : key;
+  }
 
   @override
   void dispose() {
@@ -141,6 +159,14 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _process(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
   ) {
+    if (_categoryFilter != 'All') {
+      final selected = _categoryKey(_categoryFilter);
+      docs = docs.where((d) {
+        final category = _categoryKey((d.data()['category'] ?? '').toString());
+        return category == selected;
+      }).toList();
+    }
+
     if (_searchQuery.trim().isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       docs = docs.where((d) {
@@ -151,6 +177,8 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
             (data['customerMobile'] ?? '').toString().toLowerCase().contains(
               q,
             ) ||
+            leadUniqueIdFromData(data).toLowerCase().contains(q) ||
+            (data['policyNumber'] ?? '').toString().toLowerCase().contains(q) ||
             (data['policyName'] ?? '').toString().toLowerCase().contains(q) ||
             (data['policyCode'] ?? '').toString().toLowerCase().contains(q) ||
             (data['companyName'] ?? '').toString().toLowerCase().contains(q) ||
@@ -168,6 +196,8 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
           _sortBy == 'policyEndDate' ||
           _sortBy == 'createdAt') {
         cmp = _cmpDate(da[_sortBy], db[_sortBy]);
+      } else if (_sortBy == 'leadUniqueId') {
+        cmp = leadUniqueIdFromData(da).compareTo(leadUniqueIdFromData(db));
       } else {
         cmp = (da[_sortBy] ?? '').toString().compareTo(
           (db[_sortBy] ?? '').toString(),
@@ -219,9 +249,54 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
     return d.isBefore(DateTime.now());
   }
 
-  void _openCustomerNotes(Map<String, dynamic> data) {
+  Future<void> _openCustomerNotes(Map<String, dynamic> data) async {
     final customerId = (data['customerId'] ?? '').toString().trim();
     if (customerId.isEmpty || widget.onOpenCustomerNotes == null) return;
+    try {
+      final customerRef = FirebaseFirestore.instance
+          .collection('customers')
+          .doc(customerId);
+      final customerSnap = await customerRef.get();
+      if (!customerSnap.exists) {
+        final name = (data['customerName'] ?? data['name'] ?? '')
+            .toString()
+            .trim();
+        final mobile = (data['customerMobile'] ?? data['contact'] ?? '')
+            .toString()
+            .trim();
+        final category = (data['category'] ?? '').toString().trim();
+        final now = Timestamp.now();
+        await customerRef.set({
+          'fullName': name,
+          'name': name,
+          'mobileNumber': mobile,
+          'phone': mobile,
+          'mobile': mobile,
+          'customerCategory': category,
+          'category': category,
+          'leadStatus': 'Green',
+          'status': 'Active',
+          'source': 'Policy holder notes repair',
+          'policyLinkedManually': true,
+          'createdAt': data['createdAt'] ?? now,
+          'updatedAt': now,
+          'createdBy': data['createdBy'] ?? data['employeeId'] ?? '',
+          'createdByName': data['createdByName'] ?? data['employeeName'] ?? '',
+          'employeeId': data['employeeId'] ?? data['createdBy'] ?? '',
+          'employeeName': data['employeeName'] ?? data['createdByName'] ?? '',
+          'notes': data['notes'] ?? '',
+          ...leadUniqueIdCopyFields(data),
+          'searchKey': '$name $mobile $category ${leadUniqueIdFromData(data)}'
+              .toLowerCase(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not prepare customer notes: $e')),
+      );
+      return;
+    }
     widget.onOpenCustomerNotes!(
       customerId: customerId,
       category: (data['category'] ?? '').toString(),
@@ -232,108 +307,104 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
   Widget build(BuildContext context) {
     return Container(
       color: _bg,
-      child: Column(
-        children: [
-          _buildTopBar(),
-          const Divider(height: 1, color: _border),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _stream(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: CircularProgressIndicator(color: _primary),
-                  );
-                }
-                if (snap.hasError) {
-                  return Center(
-                    child: Text(
-                      'Error: ${snap.error}',
-                      style: const TextStyle(color: _danger),
-                    ),
-                  );
-                }
+      child: AutoHideControlsRegion(
+        controls: _buildTopBar(),
+        divider: const Divider(height: 1, color: _border),
+        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _stream(),
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: _primary),
+              );
+            }
+            if (snap.hasError) {
+              return Center(
+                child: Text(
+                  'Error: ${snap.error}',
+                  style: const TextStyle(color: _danger),
+                ),
+              );
+            }
 
-                final docs = _process(snap.data?.docs ?? []);
-                if (docs.isEmpty) return _emptyState();
+            final docs = _process(snap.data?.docs ?? []);
+            if (docs.isEmpty) return _emptyState();
 
-                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _employeesStream(),
-                  builder: (context, employeeSnap) {
-                    final employees = _employeeNameLookup(
-                      employeeSnap.data?.docs ?? [],
-                    );
-                    return Column(
-                      children: [
-                        Container(
-                          color: _surface,
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                          child: Row(
-                            children: [
-                              Text(
-                                '${docs.length} policy record${docs.length == 1 ? '' : 's'}',
-                                style: const TextStyle(
-                                  color: _textMuted,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _employeesStream(),
+              builder: (context, employeeSnap) {
+                final employees = _employeeNameLookup(
+                  employeeSnap.data?.docs ?? [],
+                );
+                return Column(
+                  children: [
+                    Container(
+                      color: _surface,
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                      child: Row(
+                        children: [
+                          Text(
+                            '${_categoryFilter == 'All' ? 'All sections' : _categoryFilter}: ${docs.length} policy record${docs.length == 1 ? '' : 's'}',
+                            style: const TextStyle(
+                              color: _textMuted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _primary.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: _primary.withValues(alpha: 0.2),
                               ),
-                              const Spacer(),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _primary.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: _primary.withValues(alpha: 0.2),
-                                  ),
-                                ),
-                                child: const Text(
-                                  'customer_policies',
-                                  style: TextStyle(
-                                    color: _primaryDark,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                            ),
+                            child: const Text(
+                              'customer_policies',
+                              style: TextStyle(
+                                color: _primaryDark,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: _border),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.vertical,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _tableHeader(),
+                              ...docs.asMap().entries.map(
+                                (e) => _tableRow(
+                                  context,
+                                  e.key,
+                                  e.value,
+                                  employees,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const Divider(height: 1, color: _border),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.vertical,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _tableHeader(),
-                                  ...docs.asMap().entries.map(
-                                    (e) => _tableRow(
-                                      context,
-                                      e.key,
-                                      e.value,
-                                      employees,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                      ),
+                    ),
+                  ],
                 );
               },
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -446,6 +517,40 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _categoryFilters.map((category) {
+                final active = _categoryFilter == category;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(category),
+                    selected: active,
+                    onSelected: (_) =>
+                        setState(() => _categoryFilter = category),
+                    selectedColor: _primary.withValues(alpha: 0.12),
+                    backgroundColor: _bg,
+                    side: BorderSide(
+                      color: active
+                          ? _primary.withValues(alpha: 0.35)
+                          : _border,
+                    ),
+                    labelStyle: TextStyle(
+                      color: active ? _primaryDark : _textMuted,
+                      fontSize: 12,
+                      fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                );
+              }).toList(),
+            ),
           ),
           const SizedBox(height: 12),
           Container(
@@ -589,8 +694,10 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
         return 'customerName';
       case 'Policy':
         return 'policyName';
-      case 'Code':
-        return 'policyCode';
+      case 'Unique ID':
+        return 'leadUniqueId';
+      case 'Policy No.':
+        return 'policyNumber';
       case 'Active Date':
         return 'policyStartDate';
       case 'Expiry Date':
@@ -615,6 +722,8 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
     final noteText = (data['notes'] ?? '').toString().trim();
     final hasNotes = noteText.isNotEmpty;
     final addedBy = _policyAddedBy(data, employees);
+    final uniqueId = leadUniqueIdFromData(data);
+    final policyNumber = (data['policyNumber'] ?? '').toString().trim();
 
     return InkWell(
       onTap: () => _showPolicyDetails(context, doc.id, data, addedBy),
@@ -680,10 +789,21 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
               clip: true,
             ),
             _cell(
-              data['policyCode'] ?? '-',
+              uniqueId.isEmpty ? '-' : uniqueId,
               120,
               Alignment.centerLeft,
               style: const TextStyle(color: _textMuted, fontSize: 11),
+            ),
+            _cell(
+              policyNumber.isEmpty ? '-' : policyNumber,
+              125,
+              Alignment.centerLeft,
+              style: const TextStyle(
+                color: _textMain,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              clip: true,
             ),
             _cell(
               addedBy,
@@ -858,7 +978,13 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
                     _detailRow('Category', data['category'] ?? '-'),
                     _detailRow('Company', data['companyName'] ?? '-'),
                     _detailRow('Policy Name', data['policyName'] ?? '-'),
-                    _detailRow('Policy Code', data['policyCode'] ?? '-'),
+                    _detailRow('Policy No.', data['policyNumber'] ?? '-'),
+                    _detailRow(
+                      'Unique ID',
+                      leadUniqueIdFromData(data).isEmpty
+                          ? '-'
+                          : leadUniqueIdFromData(data),
+                    ),
                     _detailRow('Policy Added By', addedBy),
                     _detailRow(
                       'Policy PDF',
@@ -873,7 +999,9 @@ class _ActiveCustomersTabState extends State<ActiveCustomersTab> {
                   if (customerId.isNotEmpty) ...[
                     CustomerFilesCard(
                       customerId: customerId,
-                      customerName: customerName.isNotEmpty ? customerName : 'Customer',
+                      customerName: customerName.isNotEmpty
+                          ? customerName
+                          : 'Customer',
                       currentUser: null,
                     ),
                     const SizedBox(height: 14),

@@ -71,6 +71,38 @@ class _SalesTabState extends State<SalesTab> {
     return double.tryParse((value ?? '').toString().replaceAll(',', '')) ?? 0;
   }
 
+  static double _firstAmount(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final amount = _num(data[key]);
+      if (amount != 0) return amount;
+    }
+    return 0;
+  }
+
+  static double _sumAssured(Map<String, dynamic> data) {
+    return _firstAmount(data, const [
+      'sumAssured',
+      'sumInsured',
+      'insuredAmount',
+      'coverageAmount',
+      'lifeCover',
+      'assetValue',
+      'cropValue',
+      'goodsValue',
+    ]);
+  }
+
+  static double _gstAmount(Map<String, dynamic> data) {
+    final direct = _firstAmount(data, const [
+      'gstAmount',
+      'gst',
+      'totalGst',
+      'taxAmount',
+    ]);
+    if (direct != 0) return direct;
+    return _num(data['cgst']) + _num(data['sgst']) + _num(data['igst']);
+  }
+
   static String _currency(double value) {
     if (value >= 10000000) {
       return 'Rs ${(value / 10000000).toStringAsFixed(2)} Cr';
@@ -234,7 +266,7 @@ class _SalesTabState extends State<SalesTab> {
     final raw = (data['category'] ?? data['customerCategory'] ?? 'Health')
         .toString()
         .toLowerCase();
-    if (raw.contains('agri')) return 'Agricultural';
+    if (raw.contains('agri')) return 'Agriculture';
     if (raw.contains('ecgc') || raw.contains('export')) return 'ECGC';
     if (raw == 'life') return 'Life';
     if (raw == 'general') return 'General';
@@ -348,7 +380,7 @@ class _SalesTabState extends State<SalesTab> {
       'Health': _CategorySales.empty('Health'),
       'Life': _CategorySales.empty('Life'),
       'General': _CategorySales.empty('General'),
-      'Agricultural': _CategorySales.empty('Agricultural'),
+      'Agriculture': _CategorySales.empty('Agriculture'),
       'ECGC': _CategorySales.empty('ECGC'),
     };
     final leadStatus = {'Green': 0, 'Red': 0};
@@ -386,6 +418,8 @@ class _SalesTabState extends State<SalesTab> {
       );
       final premium = _num(data['premiumAmount'] ?? data['premium']);
       final commission = _num(data['commissionAmount'] ?? data['commission']);
+      final sumAssured = _sumAssured(data);
+      final gst = _gstAmount(data);
       final section = _policySection(data, catalog);
       final customerId = (data['customerId'] ?? '').toString();
       final holderKey = customerId.isNotEmpty
@@ -398,6 +432,8 @@ class _SalesTabState extends State<SalesTab> {
         policyHolders: row.policyHolders + holderIncrement,
         premium: row.premium + premium,
         commission: row.commission + commission,
+        sumAssured: row.sumAssured + sumAssured,
+        gst: row.gst + gst,
       );
       final company = (data['companyName'] ?? 'Unassigned').toString();
       companyPremium[company] = (companyPremium[company] ?? 0) + premium;
@@ -452,7 +488,25 @@ class _SalesTabState extends State<SalesTab> {
                   );
               return _EmployeeTargetRow(
                 name: name,
+                role: (e['role'] ?? 'agent').toString(),
+                leads: monthCustomers.where((customer) {
+                  final customerData = customer.data();
+                  final isLead =
+                      !policyCustomerIds.contains(customer.id) &&
+                      customerData['policyLinkedManually'] != true;
+                  return isLead &&
+                      _linkedToEmployee(customerData, employee.id, name);
+                }).length,
                 premium: premium,
+                commission: employeePolicies.fold<double>(
+                  0,
+                  (total, doc) =>
+                      total +
+                      _num(
+                        doc.data()['commissionAmount'] ??
+                            doc.data()['commission'],
+                      ),
+                ),
                 target: target,
                 conversions: employeePolicies.length,
               );
@@ -752,51 +806,19 @@ class _SalesTabState extends State<SalesTab> {
                                           runSpacing: 10,
                                           children: [
                                             _MetricTile(
-                                              'Premium',
+                                              'Total Business',
                                               _currency(dashboard.totalPremium),
                                               Icons.currency_rupee_rounded,
                                               _green,
                                             ),
                                             _MetricTile(
-                                              'Commission',
+                                              'Earned Commission',
                                               _currency(
                                                 dashboard.totalCommission,
                                               ),
                                               Icons
                                                   .account_balance_wallet_outlined,
                                               _amber,
-                                            ),
-                                            _MetricTile(
-                                              'Leads + customers',
-                                              '${dashboard.totalCustomers}',
-                                              Icons.groups_2_outlined,
-                                              _primary,
-                                            ),
-                                            _MetricTile(
-                                              'Leads this month',
-                                              '${dashboard.totalLeads}',
-                                              Icons.person_add_alt_rounded,
-                                              _accent,
-                                            ),
-                                            _MetricTile(
-                                              'Policy holders',
-                                              '${dashboard.totalPolicyHolders}',
-                                              Icons.verified_user_outlined,
-                                              _green,
-                                            ),
-                                            _MetricTile(
-                                              'Conversions',
-                                              '${dashboard.totalConversions}',
-                                              Icons.verified_outlined,
-                                              _primary,
-                                            ),
-                                            _MetricTile(
-                                              'Target reached',
-                                              '${(dashboard.targetProgress * 100).round()}%',
-                                              Icons.track_changes_rounded,
-                                              dashboard.targetProgress >= 0.8
-                                                  ? _green
-                                                  : _red,
                                             ),
                                           ],
                                         ),
@@ -805,33 +827,15 @@ class _SalesTabState extends State<SalesTab> {
                                           categories: dashboard.categories,
                                         ),
                                         const SizedBox(height: 12),
-                                        _SubSectionRevenueDashboard(
-                                          sections: dashboard.subSections,
+                                        _EmployeeSalesDashboard(
+                                          rows: dashboard.employees,
                                         ),
                                         const SizedBox(height: 12),
-                                        Row(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: _ChartCard(
-                                                title: 'Lead status this month',
-                                                child: _LeadStatusCard(
-                                                  counts: dashboard.leadStatus,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: _ChartCard(
-                                                title:
-                                                    'Employee target progress',
-                                                child: _EmployeeTargets(
-                                                  rows: dashboard.employees,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
+                                        _ChartCard(
+                                          title: 'Lead status this month',
+                                          child: _LeadStatusCard(
+                                            counts: dashboard.leadStatus,
+                                          ),
                                         ),
                                         const SizedBox(height: 12),
                                         _ChartCard(
@@ -944,6 +948,8 @@ class _CategorySales {
   final int policyHolders;
   final int conversions;
   final double premium;
+  final double sumAssured;
+  final double gst;
   final double commission;
 
   const _CategorySales({
@@ -953,6 +959,8 @@ class _CategorySales {
     required this.policyHolders,
     required this.conversions,
     required this.premium,
+    required this.sumAssured,
+    required this.gst,
     required this.commission,
   });
 
@@ -964,6 +972,8 @@ class _CategorySales {
       policyHolders: 0,
       conversions: 0,
       premium: 0,
+      sumAssured: 0,
+      gst: 0,
       commission: 0,
     );
   }
@@ -974,6 +984,8 @@ class _CategorySales {
     int? policyHolders,
     int? conversions,
     double? premium,
+    double? sumAssured,
+    double? gst,
     double? commission,
   }) {
     return _CategorySales(
@@ -983,6 +995,8 @@ class _CategorySales {
       policyHolders: policyHolders ?? this.policyHolders,
       conversions: conversions ?? this.conversions,
       premium: premium ?? this.premium,
+      sumAssured: sumAssured ?? this.sumAssured,
+      gst: gst ?? this.gst,
       commission: commission ?? this.commission,
     );
   }
@@ -990,12 +1004,18 @@ class _CategorySales {
 
 class _EmployeeTargetRow {
   final String name;
+  final String role;
+  final int leads;
   final double premium;
+  final double commission;
   final double target;
   final int conversions;
   const _EmployeeTargetRow({
     required this.name,
+    required this.role,
+    required this.leads,
     required this.premium,
+    required this.commission,
     required this.target,
     required this.conversions,
   });
@@ -1168,6 +1188,29 @@ class _CategoryDashboard extends StatelessWidget {
   final List<_CategorySales> categories;
   const _CategoryDashboard({required this.categories});
 
+  String _titleFor(String category) {
+    if (category == 'Agriculture') return 'AIC Section';
+    if (category == 'General') return 'Gen. Section';
+    return '$category Section';
+  }
+
+  String _insuredLabelFor(String category) {
+    switch (category) {
+      case 'Health':
+        return 'Insured Lives';
+      case 'Life':
+        return 'Insured Lives';
+      case 'General':
+        return 'Insured Assets';
+      case 'Agriculture':
+        return 'Insured Crops';
+      case 'ECGC':
+        return 'Insured Goods';
+      default:
+        return 'Insured Lives';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -1175,63 +1218,84 @@ class _CategoryDashboard extends StatelessWidget {
         final cardWidth = constraints.maxWidth < 760
             ? constraints.maxWidth
             : (constraints.maxWidth - 20) / 3;
-        return Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: categories.map((row) {
-            final color = row.category == 'Health'
-                ? _SalesTabState._green
-                : row.category == 'Life'
-                ? _SalesTabState._primary
-                : row.category == 'Agricultural'
-                ? _SalesTabState._green
-                : row.category == 'ECGC'
-                ? _SalesTabState._accent
-                : _SalesTabState._amber;
-            return SizedBox(
-              width: cardWidth,
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: _SalesTabState._surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _SalesTabState._border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Section wise analysis',
+              style: TextStyle(
+                color: _SalesTabState._textMain,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: categories.map((row) {
+                final color = row.category == 'Health'
+                    ? _SalesTabState._green
+                    : row.category == 'Life'
+                    ? _SalesTabState._primary
+                    : row.category == 'Agriculture'
+                    ? _SalesTabState._green
+                    : row.category == 'ECGC'
+                    ? _SalesTabState._accent
+                    : _SalesTabState._amber;
+                return SizedBox(
+                  width: cardWidth,
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _SalesTabState._surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _SalesTabState._border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          Icons.pie_chart_outline_rounded,
-                          color: color,
-                          size: 18,
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.pie_chart_outline_rounded,
+                              color: color,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _titleFor(row.category),
+                              style: const TextStyle(
+                                color: _SalesTabState._textMain,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          row.category,
-                          style: const TextStyle(
-                            color: _SalesTabState._textMain,
-                            fontWeight: FontWeight.w900,
-                          ),
+                        const SizedBox(height: 12),
+                        _mini('Leads', '${row.leads}'),
+                        _mini('Conversions', '${row.conversions}'),
+                        _mini(
+                          'Sum assured',
+                          _SalesTabState._currency(row.sumAssured),
+                        ),
+                        _mini('Premium', _SalesTabState._currency(row.premium)),
+                        _mini('GST', _SalesTabState._currency(row.gst)),
+                        _mini(
+                          'Commission',
+                          _SalesTabState._currency(row.commission),
+                        ),
+                        _mini(
+                          _insuredLabelFor(row.category),
+                          '${row.conversions}',
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    _mini('Premium', _SalesTabState._currency(row.premium)),
-                    _mini('Leads', '${row.leads}'),
-                    _mini('Policy holders', '${row.policyHolders}'),
-                    _mini('Total people', '${row.customers}'),
-                    _mini('Conversions', '${row.conversions}'),
-                    _mini(
-                      'Commission',
-                      _SalesTabState._currency(row.commission),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         );
       },
     );
@@ -1288,231 +1352,6 @@ class _ChartCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _SubSectionRevenueDashboard extends StatelessWidget {
-  final Map<String, List<_SubSectionSales>> sections;
-  const _SubSectionRevenueDashboard({required this.sections});
-
-  @override
-  Widget build(BuildContext context) {
-    final categories = ['Health', 'Life', 'General', 'Agricultural', 'ECGC'];
-    final hasData = sections.values.any((rows) => rows.isNotEmpty);
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _SalesTabState._surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _SalesTabState._border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.account_tree_outlined,
-                color: _SalesTabState._primary,
-                size: 18,
-              ),
-              SizedBox(width: 8),
-              Text(
-                'Revenue by policy subsection',
-                style: TextStyle(
-                  color: _SalesTabState._textMain,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Premium and commission split inside each department section.',
-            style: TextStyle(color: _SalesTabState._textMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-          if (!hasData)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: Center(
-                child: Text(
-                  'No subsection revenue this month.',
-                  style: TextStyle(color: _SalesTabState._textMuted),
-                ),
-              ),
-            )
-          else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final cardWidth = constraints.maxWidth < 900
-                    ? constraints.maxWidth
-                    : (constraints.maxWidth - 20) / 3;
-                return Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: categories.map((category) {
-                    final rows =
-                        sections[category] ?? const <_SubSectionSales>[];
-                    return SizedBox(
-                      width: cardWidth,
-                      child: _SubSectionCategoryCard(
-                        category: category,
-                        rows: rows,
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SubSectionCategoryCard extends StatelessWidget {
-  final String category;
-  final List<_SubSectionSales> rows;
-  const _SubSectionCategoryCard({required this.category, required this.rows});
-
-  @override
-  Widget build(BuildContext context) {
-    final totalPremium = rows.fold<double>(
-      0,
-      (total, row) => total + row.premium,
-    );
-    final totalCommission = rows.fold<double>(
-      0,
-      (total, row) => total + row.commission,
-    );
-    final color = category == 'Health'
-        ? _SalesTabState._green
-        : category == 'Life'
-        ? _SalesTabState._primary
-        : category == 'Agricultural'
-        ? _SalesTabState._green
-        : category == 'ECGC'
-        ? _SalesTabState._accent
-        : _SalesTabState._amber;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFAFBFC),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _SalesTabState._border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.folder_copy_outlined, color: color, size: 17),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  category,
-                  style: const TextStyle(
-                    color: _SalesTabState._textMain,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              Text(
-                _SalesTabState._currency(totalPremium),
-                style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Commission ${_SalesTabState._currency(totalCommission)}',
-            style: const TextStyle(
-              color: _SalesTabState._textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          if (rows.isEmpty)
-            const Text(
-              'No policies in this month',
-              style: TextStyle(color: _SalesTabState._textMuted, fontSize: 12),
-            )
-          else
-            ...rows.take(8).map((row) {
-              final pct = totalPremium <= 0 ? 0.0 : row.premium / totalPremium;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            row.section,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: _SalesTabState._textMain,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '${row.policies} policies',
-                          style: const TextStyle(
-                            color: _SalesTabState._textMuted,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    LinearProgressIndicator(
-                      value: pct,
-                      minHeight: 7,
-                      color: color,
-                      backgroundColor: _SalesTabState._border,
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Premium ${_SalesTabState._currency(row.premium)}',
-                            style: const TextStyle(
-                              color: _SalesTabState._textMuted,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          'Comm ${_SalesTabState._currency(row.commission)}',
-                          style: const TextStyle(
-                            color: _SalesTabState._textMuted,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }),
         ],
       ),
     );
@@ -1585,67 +1424,135 @@ class _LeadStatusCard extends StatelessWidget {
   }
 }
 
-class _EmployeeTargets extends StatelessWidget {
+class _EmployeeSalesDashboard extends StatelessWidget {
   final List<_EmployeeTargetRow> rows;
-  const _EmployeeTargets({required this.rows});
+  const _EmployeeSalesDashboard({required this.rows});
 
   @override
   Widget build(BuildContext context) {
-    final visible = rows.take(6).toList();
-    if (visible.isEmpty) {
-      return const SizedBox(
-        height: 120,
-        child: Center(
-          child: Text(
-            'No employee target data',
-            style: TextStyle(color: _SalesTabState._textMuted),
+    final sorted = [...rows]..sort((a, b) => b.premium.compareTo(a.premium));
+    return Container(
+      decoration: BoxDecoration(
+        color: _SalesTabState._surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _SalesTabState._border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.all(14),
+            child: Text(
+              'All employees sales performance',
+              style: TextStyle(
+                color: _SalesTabState._textMain,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ),
-        ),
-      );
-    }
-    return Column(
-      children: visible.map((row) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${row.name} (${row.conversions})',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _SalesTabState._textMain,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    row.target <= 0
-                        ? 'No target'
-                        : '${(row.progress * 100).round()}%',
-                    style: const TextStyle(
-                      color: _SalesTabState._textMuted,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+          const Divider(height: 1, color: _SalesTabState._border),
+          if (sorted.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(18),
+              child: Text(
+                'No employees found.',
+                style: TextStyle(color: _SalesTabState._textMuted),
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingTextStyle: const TextStyle(
+                  color: _SalesTabState._textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+                dataTextStyle: const TextStyle(
+                  color: _SalesTabState._textMain,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                columns: const [
+                  DataColumn(label: Text('Employee')),
+                  DataColumn(label: Text('Role')),
+                  DataColumn(label: Text('Leads')),
+                  DataColumn(label: Text('Conversions')),
+                  DataColumn(label: Text('Total Business')),
+                  DataColumn(label: Text('Earned Commission')),
+                  DataColumn(label: Text('Monthly Target')),
+                  DataColumn(label: Text('Progress')),
                 ],
+                rows: sorted.map((row) {
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(row.name.isEmpty ? '-' : row.name)),
+                      DataCell(Text(_roleLabel(row.role))),
+                      DataCell(Text('${row.leads}')),
+                      DataCell(Text('${row.conversions}')),
+                      DataCell(Text(_SalesTabState._currency(row.premium))),
+                      DataCell(Text(_SalesTabState._currency(row.commission))),
+                      DataCell(
+                        Text(
+                          row.target <= 0
+                              ? 'Not set'
+                              : _SalesTabState._currency(row.target),
+                        ),
+                      ),
+                      DataCell(_progressCell(row)),
+                    ],
+                  );
+                }).toList(),
               ),
-              const SizedBox(height: 6),
-              LinearProgressIndicator(
-                value: row.progress,
-                minHeight: 8,
-                color: row.progress >= 0.8
-                    ? _SalesTabState._green
-                    : _SalesTabState._accent,
-                backgroundColor: _SalesTabState._border,
-              ),
-            ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _roleLabel(String role) {
+    return switch (role.toLowerCase()) {
+      'team_leader' => 'Team Leader',
+      'telecaller' => 'Telecaller',
+      'executive' => 'Executive',
+      'manager' => 'Manager',
+      'admin' => 'Admin',
+      _ => role.isEmpty ? '-' : role,
+    };
+  }
+
+  static Widget _progressCell(_EmployeeTargetRow row) {
+    final label = row.target <= 0 ? '-' : '${(row.progress * 100).round()}%';
+    return SizedBox(
+      width: 130,
+      child: Row(
+        children: [
+          Expanded(
+            child: LinearProgressIndicator(
+              value: row.progress,
+              minHeight: 7,
+              color: row.progress >= 0.8
+                  ? _SalesTabState._green
+                  : _SalesTabState._accent,
+              backgroundColor: _SalesTabState._border,
+            ),
           ),
-        );
-      }).toList(),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 34,
+            child: Text(
+              label,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: _SalesTabState._textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
